@@ -1,0 +1,11 @@
+pandas
+numpy
+lightgbm
+statsmodels
+shap
+fastapi
+uvicorn
+pydantic
+pytest
+pyyaml
+httpx
