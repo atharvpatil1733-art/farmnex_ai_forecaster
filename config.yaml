@@ -26,7 +26,10 @@ ceda:
   min_seconds_between_requests: 1.0
   min_chunk_days: 60                # truncated chunks are split in half down to this size
   suspicious_row_counts: [999, 1000, 5000, 10000, 50000]
-  refresh_open_chunk: true          # re-fetch the chunk that ends at end_date on each run
+  refresh_open_chunk: true
+  # /agmarknet/markets and market_id filters hang (504) on the live API; data is fetched per
+  # district and market ids are mapped to names from the old exports (see data.py).
+  fetch_market_lists: false          # re-fetch the chunk that ends at end_date on each run
   attribution: "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
 
 # Canonical market names. `aliases` are raw spellings seen in Agmarknet / data.gov.in exports

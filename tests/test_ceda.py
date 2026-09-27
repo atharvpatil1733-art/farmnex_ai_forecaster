@@ -21,8 +21,10 @@ def ok(data):
 class FakeCeda:
     """Mimics the live API: envelope, id-based rows, POST bodies with date windows."""
 
-    def __init__(self, cap=None, quantities=True):
+    def __init__(self, cap=None, quantities=True, hang_on_market_filter=False, timeout_over_days=None):
         self.cap, self.quantities, self.calls = cap, quantities, []
+        # Live behaviour seen on 2026-09-27: a market_id filter (and /markets) -> 504 after 60 s.
+        self.hang_on_market_filter, self.timeout_over_days = hang_on_market_filter, timeout_over_days
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer test-key"
@@ -37,14 +39,20 @@ class FakeCeda:
         if path == "/agmarknet/commodities":
             return ok([{"commodity_id": v, "commodity_name": k} for k, v in CROPS.items()])
         if path == "/agmarknet/markets":
+            if self.hang_on_market_filter:
+                return httpx.Response(504, text="<html>504 Gateway Time-out</html>")
             return ok([{"market_id": k, "market_name": v} for k, v in MARKETS.items()])
         if path in ("/agmarknet/prices", "/agmarknet/quantities"):
             if path.endswith("quantities") and not self.quantities:
                 return httpx.Response(404, json={"detail": "Not Found"})
+            if self.hang_on_market_filter and "market_id" in body:
+                return httpx.Response(504, text="<html>504 Gateway Time-out</html>")
             a, b = date.fromisoformat(body["from_date"]), date.fromisoformat(body["to_date"])
+            if self.timeout_over_days and (b - a).days + 1 > self.timeout_over_days:
+                return httpx.Response(504, text="<html>504 Gateway Time-out</html>")
             rows, d = [], a
             while d <= b:
-                for mid in body["market_id"]:
+                for mid in body.get("market_id") or list(MARKETS):
                     base = {"date": f"{d.isoformat()}T00:00:00", "commodity_id": body["commodity_id"],
                             "census_state_id": 27, "census_district_id": 521, "market_id": mid}
                     if path.endswith("prices"):
@@ -58,10 +66,23 @@ class FakeCeda:
         return httpx.Response(404)
 
 
-def make_cfg(start="2024-01-01", end="2024-01-10", years=1, budget=100):
+def make_cfg(start="2024-01-01", end="2024-01-10", years=1, budget=100, fetch_lists=True):
     cfg = copy.deepcopy(load_config())
     cfg["ceda"].update(start_date=start, end_date=end, chunk_years=years,
-                       max_requests_per_run=budget, min_chunk_days=2)
+                       max_requests_per_run=budget, min_chunk_days=2,
+                       fetch_market_lists=fetch_lists)
+    return cfg
+
+
+def district_cfg(tmp_path, **kw):
+    """Live-like config: no market lists; ids get names from an export CSV with market_id."""
+    cfg = make_cfg(fetch_lists=False, **kw)
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    (exports / "old_export.csv").write_text(
+        "t,cmdty,market_id,market_name,p_modal\n" +
+        "".join(f"2024-01-01,Onion,{k},{v},1000\n" for k, v in MARKETS.items()))
+    cfg["paths"]["exports_dir"] = str(exports)
     return cfg
 
 
@@ -146,3 +167,31 @@ def test_api_key_never_in_error_text():
     with pytest.raises(Exception) as e:
         c.request("GET", "/agmarknet/commodities")
     assert "test-key" not in str(e.value)
+
+
+def test_district_level_fetch_never_sends_market_filter(tmp_path):
+    """The live API hangs on market_id filters and /markets: fetch per district, map ids locally."""
+    fake = FakeCeda(hang_on_market_filter=True)
+    cfg = district_cfg(tmp_path)
+    cache = tmp_path / "ceda"
+    Downloader(cfg, client(fake), cache, today=date(2026, 9, 27)).run()
+    data_calls = [b for p, b in fake.calls if p in ("/agmarknet/prices", "/agmarknet/quantities")]
+    assert data_calls and all("market_id" not in b and b["district_id"] == [521] for b in data_calls)
+    assert not any(p == "/agmarknet/markets" for p, _ in fake.calls)
+
+    df, rep = prepare(cfg, ceda_dir=cache)
+    assert rep.source == "ceda"
+    assert set(df["market"]) == {"Pune", "Pimpri", "Otur"}  # names from the export's market_id column
+    assert len(df) == 10 * 3 * 3
+
+
+def test_gateway_timeout_splits_window(tmp_path):
+    fake = FakeCeda(hang_on_market_filter=True, timeout_over_days=5)
+    cfg = district_cfg(tmp_path, end="2024-01-20")
+    d = Downloader(cfg, client(fake), tmp_path / "ceda", today=date(2026, 9, 27))
+    d.run()
+    assert any("splitting the window" in line for line in d.log)
+    df, _ = prepare(cfg, ceda_dir=tmp_path / "ceda")
+    onion = df[(df["commodity"] == "Onion") & (df["market"] == "Pune")]
+    assert onion["date"].min().date() == date(2024, 1, 1)
+    assert onion["date"].max().date() == date(2024, 1, 20)

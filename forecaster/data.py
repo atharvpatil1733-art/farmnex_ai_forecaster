@@ -173,9 +173,33 @@ def load_raw(cfg: dict, raw_dir: Path, rep: PrepReport,
 _QTY_KEYS = ("quantity", "qty", "arrivals", "arrival_quantity", "arrival", "value")
 
 
+def export_market_names(cfg: dict) -> dict[int, str]:
+    """market_id -> market_name from website exports that carry both columns.
+
+    The live /agmarknet/markets endpoint hangs, so this is how CEDA market ids get names.
+    Ids not seen in any export stay as 'market_id N' and are reported as unknown names.
+    """
+    exports = Path(cfg["paths"].get("exports_dir", cfg["paths"]["raw_dir"]))
+    exports = exports if exports.is_absolute() else ROOT / exports
+    names: dict[int, str] = {}
+    if not exports.is_dir():
+        return names
+    for f in sorted(exports.glob("*.csv")):
+        try:
+            head = pd.read_csv(f, nrows=0).columns
+            if {"market_id", "market_name"} <= set(head):
+                d = pd.read_csv(f, usecols=["market_id", "market_name"], dtype=str).dropna()
+                for mid, name in zip(d["market_id"], d["market_name"]):
+                    if mid.strip().isdigit():
+                        names.setdefault(int(mid), name.strip())
+        except (pd.errors.ParserError, UnicodeDecodeError, ValueError):
+            continue
+    return names
+
+
 def load_ceda(cfg: dict, ceda_dir: Path, rep: PrepReport) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read the JSON cache written by forecaster.ceda into the same shape as the exports."""
-    names: dict[int, str] = {}
+    names = export_market_names(cfg)  # id -> raw name from the old exports (same Agmarknet ids)
     for f in sorted((ceda_dir / "ref").glob("markets_*.json")):
         for m in json.loads(f.read_text()):
             if m.get("market_id") is not None and m.get("market_name"):
