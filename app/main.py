@@ -14,6 +14,7 @@ from forecaster.schemas import (CropsResponse, DemandResponse, Health, Meta, Pri
 from forecaster.service import ForecastService, NotFound
 
 CFG = load_config()
+MAX_H = max(CFG["modelling"]["horizons"])
 DEMAND_NOTE = " ".join(CFG["api"]["demand_note"].split())
 
 
@@ -58,7 +59,7 @@ def meta(request: Request):
 
 
 @app.get("/forecast/price", response_model=PriceForecast)
-def forecast_price(request: Request, market: str, crop: str, days: int = Query(3, ge=1, le=3)):
+def forecast_price(request: Request, market: str, crop: str, days: int = Query(MAX_H, ge=1, le=MAX_H)):
     return svc(request).price(market, crop, days)
 
 

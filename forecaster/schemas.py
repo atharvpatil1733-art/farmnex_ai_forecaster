@@ -120,6 +120,9 @@ class SellResponse(BaseModel):
     best: SellOption | None
     options: list[SellOption]
     message: str
+    data_source: DataSource | None = Field(description="data source of the best option")
+    as_of: date | None = Field(description="last real data date behind the best option")
+    reason: list[str] = Field(description="why the best option was chosen")
     attribution: str
 
 

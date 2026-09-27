@@ -104,3 +104,18 @@ def test_price_model_ignores_synthetic_arrivals():
     panel["arrivals_source"] = "synthetic"
     of = features_at(panel, panel["date"].max())
     assert of[["arr_lag_1", "arr_lag_7", "arr_roll_mean_7"]].isna().all().all()
+
+
+def test_evaluation_panel_ignores_post_cutoff_real_data():
+    """Synthetic calibration for evaluation must not see test-period real prices."""
+    from forecaster.data import load_mandi
+    from forecaster.train import eval_panel
+    real = load_mandi()
+    as_of = real["date"].max()
+    cutoff = as_of - pd.Timedelta(days=int(CFG["modelling"]["test_days"]))
+    shocked = real.copy()
+    shocked.loc[shocked["date"] > cutoff, "modal_price"] *= 5
+    a, b = eval_panel(CFG, real, cutoff, as_of), eval_panel(CFG, shocked, cutoff, as_of)
+    syn_a = a[a["price_source"] == "synthetic"].reset_index(drop=True)
+    syn_b = b[b["price_source"] == "synthetic"].reset_index(drop=True)
+    pd.testing.assert_frame_equal(syn_a, syn_b)

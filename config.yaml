@@ -104,6 +104,8 @@ modelling:
   horizons: [1, 2, 3]            # calendar days ahead; DIRECT forecasts, never recursive
   quantiles: [0.1, 0.5, 0.9]
   test_days: 60                  # time split: last 60 days of real data are the test set
+  festival_window_days: 3        # "festival within N days" feature
+  monsoon_months: [6, 7, 8, 9]   # monsoon flag feature
 
 # Synthetic fallback (forecaster/synthetic.py). Used PER market x crop and PER target (price,
 # arrivals) only where real data is missing or too thin. Levels below are defaults; where real
@@ -113,10 +115,8 @@ synthetic:
   seed: 42
   min_real_days: 30              # a pair needs this many real reported days to count as "real"
   closed_weekday_share: 0.12     # share of extra random non-reporting days (on top of 1 closed weekday)
-  monsoon_months: [6, 7, 8, 9]
   monsoon_uplift: 0.10           # price +10% in monsoon (supply disruption)
   festival_uplift: 0.06          # price +6% within 3 days of a festival
-  festival_window_days: 3
   price_arrivals_elasticity: 1.5 # arrivals ~ (price / base)^-elasticity
   noise_ar: 0.9                  # AR(1) coefficient of the daily log-price noise
   noise_sd: 0.04

@@ -23,7 +23,7 @@ import pandas as pd
 from forecaster.data import ROOT, load_config, load_mandi, load_ref
 from forecaster.features import (daily_calendar, feature_columns, origin_features,
                                  split_and_stack, to_model_frame)
-from forecaster.synthetic import as_of_date, build_panel
+from forecaster.synthetic import as_of_date, build_panel, generate
 
 TARGETS = ("price", "arrivals")
 
@@ -82,6 +82,7 @@ def evaluate(test: pd.DataFrame, preds: pd.DataFrame) -> tuple[pd.DataFrame, pd.
         })
     res = pd.DataFrame(rows)
     res["beats_baseline"] = res["mae_model"] < res["mae_baseline"]
+    res["beats_baseline_mape"] = res["mape_model"] < res["mape_baseline"]
     return res, t
 
 
@@ -150,6 +151,14 @@ def crop_monthly_table(panel: pd.DataFrame, cfg: dict, as_of: pd.Timestamp) -> t
     return pd.DataFrame(rows), notes
 
 
+def eval_panel(cfg: dict, real: pd.DataFrame, cutoff: pd.Timestamp, as_of: pd.Timestamp) -> pd.DataFrame:
+    """Panel for EVALUATION: synthetic data is calibrated (levels, anchoring) on real data up to
+    the cutoff only, so no test-period information reaches the training rows."""
+    synth = generate(cfg, real[real["date"] <= cutoff], end=as_of)
+    panel, _ = build_panel(cfg, real, synth)
+    return panel
+
+
 # ------------------------------------------------------------------ main
 def train(cfg: dict | None = None, out_dir: Path | None = None, report: Path | None = None) -> dict:
     t0 = time.time()
@@ -158,25 +167,28 @@ def train(cfg: dict | None = None, out_dir: Path | None = None, report: Path | N
     out_dir.mkdir(parents=True, exist_ok=True)
     real = load_mandi()
     as_of = as_of_date(real)
-    panel, sources = build_panel(cfg, real)
-    panel = panel[panel["date"] >= pd.Timestamp(cfg["modelling"]["train_start"])]
-    daily = daily_calendar(panel, as_of)
+    start = pd.Timestamp(cfg["modelling"]["train_start"])
     fest = load_ref(cfg)["festivals"]["date"]
     horizons = cfg["modelling"]["horizons"]
     cutoff = as_of - pd.Timedelta(days=int(cfg["modelling"]["test_days"]))
+    panel, sources = build_panel(cfg, real)            # serving / final refit
+    panel = panel[panel["date"] >= start]
+    ev = eval_panel(cfg, real, cutoff, as_of)          # evaluation (no test-period calibration)
+    daily_eval = daily_calendar(ev[ev["date"] >= start], as_of)
+    daily = daily_calendar(panel, as_of)
     markets, crops = list(cfg["markets"]), list(cfg["crops"])
 
     metrics, meta_targets = {}, {}
     for target in TARGETS:
-        of = origin_features(daily, target)
-        tr, te = split_and_stack(of, horizons, cutoff, fest, cfg)
+        tr, te = split_and_stack(origin_features(daily_eval, target), horizons, cutoff, fest, cfg)
         cols = feature_columns(target)
         Xtr, Xte = (to_model_frame(d, target, markets, crops) for d in (tr, te))
         models = fit_quantiles(Xtr, np.log1p(tr["y_true"]), cfg)
         res, _ = evaluate(te, predict_quantiles(models, Xte))
         metrics[target] = res
-        # refit on train + test for serving
-        full = pd.concat([tr, te], ignore_index=True)
+        # refit on ALL rows (train + test period, synthetic calibrated on all real data) for serving
+        a, b = split_and_stack(origin_features(daily, target), horizons, cutoff, fest, cfg)
+        full = pd.concat([a, b], ignore_index=True)
         final = fit_quantiles(to_model_frame(full, target, markets, crops), np.log1p(full["y_true"]), cfg)
         for q, m in final.items():
             m.booster_.save_model(str(out_dir / f"{target}_{qname(q)}.txt"))
@@ -221,7 +233,9 @@ def write_metrics(metrics: dict, meta: dict, sources: pd.DataFrame, path: Path) 
         out += [f"## {target.title()}", "", _fmt(res), ""]
         allr = res[res["horizon"] == "all"]
         bad = allr.loc[~allr["beats_baseline"], "crop"].tolist()
-        out.append(f"**Crops that do NOT beat the baseline ({target}):** {', '.join(bad) if bad else 'none'}")
+        out.append(f"**Crops that do NOT beat the baseline on MAE ({target}):** {', '.join(bad) if bad else 'none'}")
+        weak = [f"{r.crop} h{r.horizon}" for r in res[~res["beats_baseline_mape"]].itertuples()]
+        out.append(f"**Crop x horizon rows that do NOT beat it on MAPE ({target}):** {', '.join(weak) if weak else 'none'}")
         out.append("")
     n_real = (sources["price_source"] == "real").sum()
     out += ["## Data behind the models", "",

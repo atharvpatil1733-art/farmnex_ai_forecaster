@@ -240,8 +240,15 @@ class ForecastService:
         options.sort(key=lambda o: (tier(o), -o["net_price_per_quintal"]))
         msg = (f"{len(options)} market(s) within {radius:g} km" if options
                else f"no configured market within {radius:g} km; increase radius_km")
+        best = options[0] if options else None
+        why = []
+        if best:
+            why = [f"{best['market']}: highest net price among markets with the most trustworthy data "
+                   f"(fresh real > stale real > synthetic)"] + best["reason"][:2]
         return {"crop": crop, "qty_quintal": qty_quintal, "radius_km": radius, "forecast_origin": self.as_of.date(),
-                "best": options[0] if options else None, "options": options, "message": msg,
+                "best": best, "options": options, "message": msg,
+                "data_source": best["data_source"] if best else None, "as_of": best["as_of"] if best else None,
+                "reason": why,
                 "attribution": self.attribution}
 
     def best_crops(self, district: str, sowing_month: int, k: int = 5) -> dict:

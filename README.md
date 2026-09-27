@@ -24,12 +24,29 @@ The API allows 40 requests per hour. The downloader caches every response and st
 the limit; if it says "Stopped early", rerun it in an hour and it continues where it left off.
 All settings (markets, crops, date range, chunk size) are in `config.yaml`.
 
-## Train and serve (in progress)
+## Train and serve
 
 ```bash
-python -m forecaster.train
-uvicorn app.main:app --reload
+python -m forecaster.train          # ~20 s on 4 CPUs -> artifacts/, reports/metrics.md
+uvicorn app.main:app                # loads artifacts once; docs at http://localhost:8000/docs
 ```
+
+`python -m forecaster.synthetic` writes the synthetic fallback data to `data/synthetic/` for
+inspection; training and serving rebuild it in memory (deterministic, < 1 s).
+
+| Endpoint | What it answers |
+|---|---|
+| `GET /health` | status, model version, data as_of |
+| `GET /meta` | markets (lat/lon, likely-closed weekdays), crops, districts, real/synthetic per pair, attribution |
+| `GET /forecast/price?market=&crop=&days=3` | p10/p50/p90 modal price (+ arrivals) for day +1..+3 after as_of |
+| `GET /forecast/demand?district=&date=` | HIGH/NORMAL/LOW per crop (a PROXY from mandi data) |
+| `POST /forecast/sell-options` `{lat, lon, crop, qty_quintal, radius_km}` | best market and day, asking (p50) and floor (p10) price, net of transport |
+| `GET /forecast/crops?district=&sowing_month=&k=5` | crops ranked by expected price at harvest |
+
+Every answer carries `reason`, `data_source` ("real"/"synthetic") and `as_of` (last real data
+date). Forecasts start from the data's last date (`forecast_origin`), not today, because CEDA
+data lags. See `REVIEW.md` for assumptions and limitations, `reports/` for metrics, data
+quality and sample responses.
 
 ## Tests
 

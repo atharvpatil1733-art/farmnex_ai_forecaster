@@ -91,8 +91,8 @@ def add_calendar(df: pd.DataFrame, when: pd.Series, festivals: pd.Series, cfg: d
     dist = np.minimum(np.abs((w - fest[pos - 1]).astype(int)), np.abs((fest[pos] - w).astype(int)))
     df["dow"] = when.dt.dayofweek.to_numpy()
     df["month"] = when.dt.month.to_numpy()
-    df["festival_3d"] = (dist <= 3).astype(int)
-    df["monsoon"] = when.dt.month.isin(cfg["synthetic"]["monsoon_months"]).astype(int).to_numpy()
+    df["festival_3d"] = (dist <= int(cfg["modelling"]["festival_window_days"])).astype(int)
+    df["monsoon"] = when.dt.month.isin(cfg["modelling"]["monsoon_months"]).astype(int).to_numpy()
     return df
 
 

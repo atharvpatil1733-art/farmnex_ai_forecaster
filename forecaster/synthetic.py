@@ -73,8 +73,8 @@ def generate(cfg: dict | None = None, real: pd.DataFrame | None = None,
     days = pd.date_range(start, end, freq="D")
     fest = load_ref(cfg)["festivals"]["date"].values.astype("datetime64[D]")
     d64 = days.values.astype("datetime64[D]")
-    near = np.abs(d64[:, None] - fest[None, :]).astype(int).min(axis=1) <= scfg["festival_window_days"]
-    monsoon = np.isin(days.month, scfg["monsoon_months"])
+    near = np.abs(d64[:, None] - fest[None, :]).astype(int).min(axis=1) <= cfg["modelling"]["festival_window_days"]
+    monsoon = np.isin(days.month, cfg["modelling"]["monsoon_months"])
     doy = np.asarray(days.dayofyear)
 
     out = []
