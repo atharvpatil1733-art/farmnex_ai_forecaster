@@ -104,3 +104,24 @@ modelling:
   horizons: [1, 2, 3]            # calendar days ahead; DIRECT forecasts, never recursive
   quantiles: [0.1, 0.5, 0.9]
   test_days: 60                  # time split: last 60 days of real data are the test set
+
+# Synthetic fallback (forecaster/synthetic.py). Used PER market x crop and PER target (price,
+# arrivals) only where real data is missing or too thin. Levels below are defaults; where real
+# data exists for a crop, its real median price / per-market median arrivals replace them.
+synthetic:
+  years: 3                       # of daily history, ending at the real data's as_of date
+  seed: 42
+  min_real_days: 30              # a pair needs this many real reported days to count as "real"
+  closed_weekday_share: 0.12     # share of extra random non-reporting days (on top of 1 closed weekday)
+  monsoon_months: [6, 7, 8, 9]
+  monsoon_uplift: 0.10           # price +10% in monsoon (supply disruption)
+  festival_uplift: 0.06          # price +6% within 3 days of a festival
+  festival_window_days: 3
+  price_arrivals_elasticity: 1.5 # arrivals ~ (price / base)^-elasticity
+  noise_ar: 0.9                  # AR(1) coefficient of the daily log-price noise
+  noise_sd: 0.04
+  crops:
+    Onion:  {base_price: 1850, peak_month: 10, seasonal_amp: 0.35, base_arrivals: 60}
+    Tomato: {base_price: 1500, peak_month: 8,  seasonal_amp: 0.45, base_arrivals: 30}
+    Potato: {base_price: 1800, peak_month: 9,  seasonal_amp: 0.15, base_arrivals: 40}
+  default_crop: {base_price: 2000, peak_month: 9, seasonal_amp: 0.25, base_arrivals: 30}

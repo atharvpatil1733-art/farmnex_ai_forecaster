@@ -9,3 +9,6 @@ venv/
 
 # raw CEDA API responses: large and re-downloadable with `python -m forecaster.ceda`
 data/raw/ceda/
+
+# generated synthetic fallback data (python -m forecaster.synthetic)
+data/synthetic/
