@@ -1,0 +1,9 @@
+t,cmdty,market_id,market_name,state_id,state_name,district_id,district_name,variety,p_min,p_max,p_modal
+"2025-10-30","Potato","172","Pune","27","Maharashtra","521","Pune","Local","1300","2600","1950"
+"2025-10-30","Potato","1455","Junnar","27","Maharashtra","521","Pune","Local","1500","2200","1900"
+"2025-10-30","Potato","2492","Junnar(Otur)","27","Maharashtra","521","Pune","Local","500","2000","1600"
+"2025-10-30","Potato","2493","Khed(Chakan)","27","Maharashtra","521","Pune","Other","1200","2500","1500"
+"2025-10-30","Potato","2495","Pune(Khadiki)","27","Maharashtra","521","Pune","Local","900","1200","1050"
+"2025-10-30","Potato","3960","Junnar(Narayangaon)","27","Maharashtra","521","Pune","Other","700","2200","1500"
+"2025-10-30","Potato","4751","Pune(Manjri)","27","Maharashtra","521","Pune","Other","1000","2000","1500"
+"2025-10-30","Potato","4752","Pune(Moshi)","27","Maharashtra","521","Pune","Local","1300","1800","1550"

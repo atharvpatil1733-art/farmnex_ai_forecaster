@@ -1,0 +1,8 @@
+t,cmdty,market_id,market_name,state_id,state_name,district_id,district_name,variety,p_min,p_max,p_modal
+"2025-10-30","Tomato","172","Pune","27","Maharashtra","521","Pune","Local","500","1200","850"
+"2025-10-30","Tomato","2493","Khed(Chakan)","27","Maharashtra","521","Pune","Other","600","1000","800"
+"2025-10-30","Tomato","2494","Pune(Pimpri)","27","Maharashtra","521","Pune","Local","1300","1500","1400"
+"2025-10-30","Tomato","2495","Pune(Khadiki)","27","Maharashtra","521","Pune","Local","1100","1200","1150"
+"2025-10-30","Tomato","3960","Junnar(Narayangaon)","27","Maharashtra","521","Pune","Local","500","1250","1000"
+"2025-10-30","Tomato","4751","Pune(Manjri)","27","Maharashtra","521","Pune","Other","1000","2000","1500"
+"2025-10-30","Tomato","4752","Pune(Moshi)","27","Maharashtra","521","Pune","Local","1000","1500","1250"
