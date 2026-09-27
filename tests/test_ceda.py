@@ -1,0 +1,148 @@
+"""Tests for forecaster.ceda against a fake CEDA server (no network, no API key needed)."""
+import copy
+import json
+from datetime import date, timedelta
+
+import httpx
+import pytest
+
+from forecaster.ceda import (BudgetExhausted, CedaAuthError, CedaClient, CedaRateLimitError,
+                             Downloader, date_chunks)
+from forecaster.data import load_config, prepare
+
+MARKETS = {1: "Pune", 2: "Pune(Pimpri)", 3: "Junnar(Otur)"}
+CROPS = {"Onion": 23, "Tomato": 78, "Potato": 24}
+
+
+def ok(data):
+    return httpx.Response(200, json={"output": {"type": "success", "message": "", "data": data}})
+
+
+class FakeCeda:
+    """Mimics the live API: envelope, id-based rows, POST bodies with date windows."""
+
+    def __init__(self, cap=None, quantities=True):
+        self.cap, self.quantities, self.calls = cap, quantities, []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer test-key"
+        path = request.url.path.removeprefix("/v1")
+        body = json.loads(request.content) if request.content else {}
+        self.calls.append((path, body))
+        if path == "/agmarknet/geographies":
+            return ok([{"census_state_id": 27, "census_state_name": "Maharashtra",
+                        "census_district_id": 521, "census_district_name": "Pune"},
+                       {"census_state_id": 27, "census_state_name": "Maharashtra",
+                        "census_district_id": 517, "census_district_name": "Thane"}])
+        if path == "/agmarknet/commodities":
+            return ok([{"commodity_id": v, "commodity_name": k} for k, v in CROPS.items()])
+        if path == "/agmarknet/markets":
+            return ok([{"market_id": k, "market_name": v} for k, v in MARKETS.items()])
+        if path in ("/agmarknet/prices", "/agmarknet/quantities"):
+            if path.endswith("quantities") and not self.quantities:
+                return httpx.Response(404, json={"detail": "Not Found"})
+            a, b = date.fromisoformat(body["from_date"]), date.fromisoformat(body["to_date"])
+            rows, d = [], a
+            while d <= b:
+                for mid in body["market_id"]:
+                    base = {"date": f"{d.isoformat()}T00:00:00", "commodity_id": body["commodity_id"],
+                            "census_state_id": 27, "census_district_id": 521, "market_id": mid}
+                    if path.endswith("prices"):
+                        rows.append(dict(base, min_price=900, max_price=1100, modal_price=1000 + mid))
+                    else:
+                        rows.append(dict(base, quantity=100.0 * mid))
+                d += timedelta(days=1)
+            if self.cap and len(rows) > self.cap:
+                rows = rows[-self.cap:]  # like the website: keep only the newest rows
+            return ok(rows)
+        return httpx.Response(404)
+
+
+def make_cfg(start="2024-01-01", end="2024-01-10", years=1, budget=100):
+    cfg = copy.deepcopy(load_config())
+    cfg["ceda"].update(start_date=start, end_date=end, chunk_years=years,
+                       max_requests_per_run=budget, min_chunk_days=2)
+    return cfg
+
+
+def client(fake, budget=100):
+    return CedaClient("test-key", "https://api.test/v1", max_requests=budget, min_interval=0,
+                      transport=httpx.MockTransport(fake))
+
+
+def test_date_chunks_cover_range_without_overlap():
+    chunks = date_chunks(date(2012, 3, 1), date(2026, 9, 27), 5)
+    assert chunks[0] == (date(2012, 3, 1), date(2016, 12, 31))
+    assert chunks[-1][1] == date(2026, 9, 27)
+    for (_, b), (a, _) in zip(chunks, chunks[1:]):
+        assert a == b + timedelta(days=1)
+
+
+def test_download_then_prepare_end_to_end(tmp_path):
+    fake, cfg = FakeCeda(), make_cfg()
+    summary = Downloader(cfg, client(fake), tmp_path, today=date(2026, 9, 27)).run()
+    assert summary["state_id"] == 27 and summary["districts"] == {"Pune": 521}
+    assert {c["indicator"] for c in summary["chunks"]} == {"price", "quantity"}
+    assert (tmp_path / "manifest.json").exists()
+
+    df, rep = prepare(cfg, ceda_dir=tmp_path)
+    assert rep.source == "ceda"
+    assert set(df["market"]) == {"Pune", "Pimpri", "Otur"}  # aliases applied to API names
+    assert set(df["commodity"]) == set(CROPS)
+    assert len(df) == 10 * 3 * 3
+    pimpri = df[(df["market"] == "Pimpri") & (df["commodity"] == "Onion")].iloc[0]
+    assert pimpri["modal_price"] == 1002 and pimpri["arrivals_tonnes"] == 200.0
+
+
+def test_rerun_uses_cache(tmp_path):
+    cfg = make_cfg()
+    Downloader(cfg, client(FakeCeda()), tmp_path, today=date(2026, 9, 27)).run()
+    fake2 = FakeCeda()
+    Downloader(cfg, client(fake2), tmp_path, today=date(2026, 9, 27)).run()
+    assert fake2.calls == []  # closed windows and reference lists all came from disk
+
+
+def test_capped_response_is_split(tmp_path):
+    fake, cfg = FakeCeda(cap=24), make_cfg(end="2024-01-20")  # 20 days x 3 markets = 60 rows
+    cfg["ceda"]["suspicious_row_counts"] = [24]
+    d = Downloader(cfg, client(fake), tmp_path, today=date(2026, 9, 27))
+    d.run()
+    assert any("splitting" in line for line in d.log)
+    df, _ = prepare(cfg, ceda_dir=tmp_path)
+    onion = df[(df["commodity"] == "Onion") & (df["market"] == "Pune")]
+    assert onion["date"].min().date() == date(2024, 1, 1)  # oldest days recovered
+
+
+def test_budget_stop_then_resume(tmp_path):
+    cfg = make_cfg()
+    with pytest.raises(BudgetExhausted):
+        Downloader(cfg, client(FakeCeda(), budget=5), tmp_path, today=date(2026, 9, 27)).run()
+    Downloader(cfg, client(FakeCeda()), tmp_path, today=date(2026, 9, 27)).run()
+    df, _ = prepare(cfg, ceda_dir=tmp_path)
+    assert len(df) == 90
+
+
+def test_quantity_endpoint_failure_keeps_prices(tmp_path):
+    cfg = make_cfg()
+    summary = Downloader(cfg, client(FakeCeda(quantities=False)), tmp_path,
+                         today=date(2026, 9, 27)).run()
+    assert any("quantity" in s for s in summary["skipped"])
+    df, _ = prepare(cfg, ceda_dir=tmp_path)
+    assert df["modal_price"].notna().all() and df["arrivals_tonnes"].isna().all()
+
+
+def test_auth_and_rate_limit_errors():
+    c = client(lambda r: httpx.Response(401))
+    with pytest.raises(CedaAuthError):
+        c.request("GET", "/agmarknet/commodities")
+    c = client(lambda r: httpx.Response(429, headers={"Retry-After": "120"}))
+    with pytest.raises(CedaRateLimitError) as e:
+        c.request("GET", "/agmarknet/commodities")
+    assert e.value.retry_after_seconds == 120
+
+
+def test_api_key_never_in_error_text():
+    c = client(lambda r: httpx.Response(400, text="bad key test-key"))
+    with pytest.raises(Exception) as e:
+        c.request("GET", "/agmarknet/commodities")
+    assert "test-key" not in str(e.value)

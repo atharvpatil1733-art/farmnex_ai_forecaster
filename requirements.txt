@@ -1,11 +1,22 @@
-pandas
-numpy
-lightgbm
-statsmodels
-shap
-fastapi
-uvicorn
-pydantic
-pytest
-pyyaml
-httpx
+# Python 3.11. Lower bounds only (prototype); pin exact versions before deploying.
+pandas>=2.1
+numpy>=1.26
+pyyaml>=6.0
+openpyxl>=3.1          # reading .xlsx website exports (fallback source)
+
+# Data download (CEDA Agmarknet API)
+httpx>=0.27
+python-dotenv>=1.0     # loads CEDA_API_KEY from .env
+
+# Modelling
+lightgbm>=4.3
+statsmodels>=0.14      # SARIMAX for the crop-to-grow feature
+shap>=0.45
+
+# Service
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+
+# Tests
+pytest>=8.0
