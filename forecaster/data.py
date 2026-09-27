@@ -633,6 +633,18 @@ def _month_runs(months: list[str]) -> str:
     return ", ".join(str(a) if a == b else f"{a}..{b}" for a, b in runs)
 
 
+def load_ref(cfg: dict | None = None) -> dict[str, pd.DataFrame]:
+    """data/ref/ tables (approximate, see data/README.md): markets, crop_calendar, festivals."""
+    cfg = cfg or load_config()
+    ref = ROOT / cfg["paths"]["ref_dir"]
+    markets = pd.read_csv(ref / "markets.csv")
+    cal = pd.read_csv(ref / "crop_calendar.csv")
+    cal["sowing_months"] = cal["sowing_months"].astype(str).map(
+        lambda s: [int(m) for m in s.split(";") if m.strip()])
+    fest = pd.read_csv(ref / "festivals.csv", parse_dates=["date"])
+    return {"markets": markets, "crop_calendar": cal, "festivals": fest}
+
+
 def main() -> None:
     cfg = load_config()
     df, rep = prepare(cfg)
