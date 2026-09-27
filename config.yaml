@@ -125,3 +125,21 @@ synthetic:
     Tomato: {base_price: 1500, peak_month: 8,  seasonal_amp: 0.45, base_arrivals: 30}
     Potato: {base_price: 1800, peak_month: 9,  seasonal_amp: 0.15, base_arrivals: 40}
   default_crop: {base_price: 2000, peak_month: 9, seasonal_amp: 0.25, base_arrivals: 30}
+
+# LightGBM (sensible defaults, no tuning) and the monthly SARIMAX for "best crop to grow".
+lightgbm:
+  n_estimators: 300
+  learning_rate: 0.05
+  num_leaves: 31
+  min_child_samples: 20
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  n_jobs: 4
+sarimax:
+  order: [1, 0, 0]
+  seasonal_order: [1, 0, 0, 12]
+  min_months: 12                 # fewer real monthly points -> skip SARIMAX, use the fallback
+  plausible_ratio: [0.33, 3.0]   # forecasts outside this x the history mean count as a failure
+  months_ahead: 18
+likely_closed_share: 0.25        # a weekday with < 25% of the market's typical reports -> likely closed

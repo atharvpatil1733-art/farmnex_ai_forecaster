@@ -1,0 +1,550 @@
+{
+  "model_version": "20260927T164231Z-asof20251030",
+  "as_of": "2025-10-30",
+  "cutoff": "2025-08-31",
+  "horizons": [
+    1,
+    2,
+    3
+  ],
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "markets": [
+    "Pune",
+    "Pimpri",
+    "Manjri",
+    "Moshi",
+    "Khadki",
+    "Khed(Chakan)",
+    "Manchar",
+    "Junnar",
+    "Otur",
+    "Narayangaon",
+    "Alephata",
+    "Baramati",
+    "Shirur",
+    "Indapur",
+    "Vashi",
+    "Kalyan"
+  ],
+  "crops": [
+    "Onion",
+    "Tomato",
+    "Potato"
+  ],
+  "targets": {
+    "price": {
+      "features": [
+        "market",
+        "commodity",
+        "horizon",
+        "dow",
+        "month",
+        "festival_3d",
+        "monsoon",
+        "days_since_last_report",
+        "reports_last_7d",
+        "is_synthetic",
+        "y_lag_1",
+        "y_lag_2",
+        "y_lag_3",
+        "y_lag_7",
+        "y_lag_14",
+        "y_roll_mean_7",
+        "y_roll_std_7",
+        "y_roll_mean_14",
+        "y_roll_std_14",
+        "y_roll_mean_28",
+        "y_roll_std_28",
+        "arr_lag_1",
+        "arr_lag_7",
+        "arr_roll_mean_7"
+      ],
+      "train_rows": 56611,
+      "test_rows": 5073,
+      "final_rows": 61684
+    },
+    "arrivals": {
+      "features": [
+        "market",
+        "commodity",
+        "horizon",
+        "dow",
+        "month",
+        "festival_3d",
+        "monsoon",
+        "days_since_last_report",
+        "reports_last_7d",
+        "is_synthetic",
+        "y_lag_1",
+        "y_lag_2",
+        "y_lag_3",
+        "y_lag_7",
+        "y_lag_14",
+        "y_roll_mean_7",
+        "y_roll_std_7",
+        "y_roll_mean_14",
+        "y_roll_std_14",
+        "y_roll_mean_28",
+        "y_roll_std_28",
+        "price_lag_1",
+        "price_roll_mean_7"
+      ],
+      "train_rows": 70691,
+      "test_rows": 5529,
+      "final_rows": 76220
+    }
+  },
+  "likely_closed": {
+    "Pune": [
+      5
+    ],
+    "Pimpri": [],
+    "Manjri": [],
+    "Moshi": [
+      2
+    ],
+    "Khadki": [],
+    "Khed(Chakan)": [
+      0
+    ],
+    "Manchar": [
+      5
+    ],
+    "Junnar": [
+      0,
+      1,
+      2,
+      4,
+      5
+    ],
+    "Otur": [
+      1,
+      2,
+      4
+    ],
+    "Narayangaon": [
+      1
+    ],
+    "Alephata": [
+      0,
+      2,
+      3,
+      5
+    ],
+    "Baramati": [
+      1,
+      3,
+      4,
+      6
+    ],
+    "Shirur": [
+      3,
+      5
+    ],
+    "Indapur": [
+      5,
+      6
+    ],
+    "Vashi": [],
+    "Kalyan": []
+  },
+  "sources": [
+    {
+      "market": "Pune",
+      "commodity": "Onion",
+      "real_price_days": 229,
+      "real_arrivals_days": 223,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Pune",
+      "commodity": "Tomato",
+      "real_price_days": 130,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Pune",
+      "commodity": "Potato",
+      "real_price_days": 321,
+      "real_arrivals_days": 306,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Pimpri",
+      "commodity": "Onion",
+      "real_price_days": 272,
+      "real_arrivals_days": 270,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Pimpri",
+      "commodity": "Tomato",
+      "real_price_days": 151,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Pimpri",
+      "commodity": "Potato",
+      "real_price_days": 2,
+      "real_arrivals_days": 5,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Manjri",
+      "commodity": "Onion",
+      "real_price_days": 262,
+      "real_arrivals_days": 249,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Manjri",
+      "commodity": "Tomato",
+      "real_price_days": 143,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Manjri",
+      "commodity": "Potato",
+      "real_price_days": 365,
+      "real_arrivals_days": 342,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Moshi",
+      "commodity": "Onion",
+      "real_price_days": 239,
+      "real_arrivals_days": 236,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Moshi",
+      "commodity": "Tomato",
+      "real_price_days": 134,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Moshi",
+      "commodity": "Potato",
+      "real_price_days": 340,
+      "real_arrivals_days": 323,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Khadki",
+      "commodity": "Onion",
+      "real_price_days": 221,
+      "real_arrivals_days": 235,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Khadki",
+      "commodity": "Tomato",
+      "real_price_days": 137,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Khadki",
+      "commodity": "Potato",
+      "real_price_days": 329,
+      "real_arrivals_days": 320,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Khed(Chakan)",
+      "commodity": "Onion",
+      "real_price_days": 202,
+      "real_arrivals_days": 200,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Khed(Chakan)",
+      "commodity": "Tomato",
+      "real_price_days": 121,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Khed(Chakan)",
+      "commodity": "Potato",
+      "real_price_days": 288,
+      "real_arrivals_days": 283,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Manchar",
+      "commodity": "Onion",
+      "real_price_days": 78,
+      "real_arrivals_days": 88,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Manchar",
+      "commodity": "Tomato",
+      "real_price_days": 62,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Manchar",
+      "commodity": "Potato",
+      "real_price_days": 97,
+      "real_arrivals_days": 125,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Junnar",
+      "commodity": "Onion",
+      "real_price_days": 43,
+      "real_arrivals_days": 41,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Junnar",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Junnar",
+      "commodity": "Potato",
+      "real_price_days": 24,
+      "real_arrivals_days": 35,
+      "price_source": "synthetic",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Otur",
+      "commodity": "Onion",
+      "real_price_days": 73,
+      "real_arrivals_days": 71,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Otur",
+      "commodity": "Tomato",
+      "real_price_days": 9,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Otur",
+      "commodity": "Potato",
+      "real_price_days": 101,
+      "real_arrivals_days": 125,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Narayangaon",
+      "commodity": "Onion",
+      "real_price_days": 170,
+      "real_arrivals_days": 174,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Narayangaon",
+      "commodity": "Tomato",
+      "real_price_days": 118,
+      "real_arrivals_days": 0,
+      "price_source": "real",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Narayangaon",
+      "commodity": "Potato",
+      "real_price_days": 139,
+      "real_arrivals_days": 144,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Alephata",
+      "commodity": "Onion",
+      "real_price_days": 90,
+      "real_arrivals_days": 91,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Alephata",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Alephata",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Baramati",
+      "commodity": "Onion",
+      "real_price_days": 55,
+      "real_arrivals_days": 52,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Baramati",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Baramati",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Shirur",
+      "commodity": "Onion",
+      "real_price_days": 21,
+      "real_arrivals_days": 21,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Shirur",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Shirur",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Indapur",
+      "commodity": "Onion",
+      "real_price_days": 41,
+      "real_arrivals_days": 49,
+      "price_source": "real",
+      "arrivals_source": "real"
+    },
+    {
+      "market": "Indapur",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Indapur",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Vashi",
+      "commodity": "Onion",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Vashi",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Vashi",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Kalyan",
+      "commodity": "Onion",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Kalyan",
+      "commodity": "Tomato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    },
+    {
+      "market": "Kalyan",
+      "commodity": "Potato",
+      "real_price_days": 0,
+      "real_arrivals_days": 0,
+      "price_source": "synthetic",
+      "arrivals_source": "synthetic"
+    }
+  ],
+  "sarimax_notes": [
+    "Pune x Onion: only 11 months of data (< 12)",
+    "Pune x Tomato: only 7 months of data (< 12)",
+    "Pune x Potato: SARIMAX forecast implausible",
+    "Thane x Onion: SARIMAX ok",
+    "Thane x Tomato: SARIMAX ok",
+    "Thane x Potato: SARIMAX ok"
+  ],
+  "train_seconds": 20.0
+}
