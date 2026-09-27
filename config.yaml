@@ -1,0 +1,64 @@
+# farmnex_ai_forecaster configuration. Never hardcode markets/crops in code; add them here.
+
+paths:
+  raw_dir: data/raw
+  mandi_csv: data/raw/mandi.csv
+  synthetic_dir: data/synthetic
+  ref_dir: data/ref
+  artifacts_dir: artifacts
+  reports_dir: reports
+
+# Canonical market names. `aliases` are raw spellings seen in Agmarknet / data.gov.in exports
+# (matched case-insensitively after trimming spaces). `in_raw_data: false` = no real data yet,
+# these pairs will fall back to synthetic data.
+markets:
+  Pune:           {district: Pune, aliases: ["Pune", "Pune APMC", "Pune(Gultekdi)", "Gultekdi"]}
+  Pimpri:         {district: Pune, aliases: ["Pune(Pimpri)", "Pimpri", "Pimpri Chinchwad"]}
+  Manjri:         {district: Pune, aliases: ["Pune(Manjri)", "Manjri"]}
+  Moshi:          {district: Pune, aliases: ["Pune(Moshi)", "Moshi"]}
+  Khadki:         {district: Pune, aliases: ["Pune(Khadiki)", "Pune(Khadki)", "Khadki", "Khadiki"]}
+  Khed(Chakan):   {district: Pune, aliases: ["Khed(Chakan)", "Khed (Chakan)", "Chakan"]}
+  Manchar:        {district: Pune, aliases: ["Manchar"]}
+  Junnar:         {district: Pune, aliases: ["Junnar"]}
+  Otur:           {district: Pune, aliases: ["Junnar(Otur)", "Otur"]}
+  Narayangaon:    {district: Pune, aliases: ["Junnar(Narayangaon)", "Narayangaon"]}
+  Alephata:       {district: Pune, aliases: ["Junnar(Alephata)", "Alephata"]}
+  Baramati:       {district: Pune, aliases: ["Baramati"]}
+  Shirur:         {district: Pune, aliases: ["Shirur"]}
+  Indapur:        {district: Pune, aliases: ["Indapur"]}
+  # Mumbai-region markets: planned, no real data yet (to be added later).
+  Vashi:          {district: Thane, in_raw_data: false, aliases: ["Vashi", "Vashi New Mumbai", "Vashi (Navi Mumbai)", "Mumbai", "Navi Mumbai"]}
+  Kalyan:         {district: Thane, in_raw_data: false, aliases: ["Kalyan"]}
+
+# Canonical crop names. `has_arrivals: false` forces arrivals_tonnes to NaN (never invented).
+# plausible_modal_min/max (Rs/quintal) are only used to FLAG suspicious prices in the report
+# (e.g. values that look like Rs/kg); they never drop or convert rows by themselves.
+crops:
+  Onion:
+    aliases: ["Onion", "Onion Red", "Onion (Red)", "Red Onion", "Onion Green", "Kanda"]
+    has_arrivals: true
+    plausible_modal_min: 300
+    plausible_modal_max: 8000
+  Tomato:
+    aliases: ["Tomato", "Tamatar", "Tomato Hybrid", "Tomato Local"]
+    # Only price exports exist for tomato (2025 onwards); keep arrivals empty.
+    has_arrivals: false
+    plausible_modal_min: 200
+    plausible_modal_max: 8000
+  Potato:
+    aliases: ["Potato", "Batata", "Aloo", "Potato Local"]
+    has_arrivals: true
+    plausible_modal_min: 300
+    plausible_modal_max: 6000
+
+data_prep:
+  # Unit of arrivals in the raw quantity exports when the column name does not say it.
+  # data.gov.in "qty" for Pune APMC (~900/day onion) is consistent with tonnes, not quintals.
+  default_arrivals_unit: tonnes
+  outlier_window_days: 30        # rolling median window (calendar days, centred)
+  outlier_min_points: 5          # need at least this many prices in the window to judge
+  outlier_high_ratio: 4.0        # drop modal > 4x rolling median
+  outlier_low_ratio: 0.25        # drop modal < 0.25x rolling median
+  low_coverage_warn_pct: 50      # warn when a market x crop reports on < 50% of days
+  long_gap_days: 14              # gaps longer than this are listed; never interpolated
+  suspicious_row_counts: [500, 1000, 5000, 10000]  # exports capped at these sizes are likely truncated
