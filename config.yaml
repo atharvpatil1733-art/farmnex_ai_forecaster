@@ -120,6 +120,7 @@ synthetic:
   price_arrivals_elasticity: 1.5 # arrivals ~ (price / base)^-elasticity
   noise_ar: 0.9                  # AR(1) coefficient of the daily log-price noise
   noise_sd: 0.04
+  anchor_recent_days: 60         # scale each synthetic crop so its last-60-day median = the real one
   crops:
     Onion:  {base_price: 1850, peak_month: 10, seasonal_amp: 0.35, base_arrivals: 60}
     Tomato: {base_price: 1500, peak_month: 8,  seasonal_amp: 0.45, base_arrivals: 30}
@@ -143,3 +144,15 @@ sarimax:
   plausible_ratio: [0.33, 3.0]   # forecasts outside this x the history mean count as a failure
   months_ahead: 18
 likely_closed_share: 0.25        # a weekday with < 25% of the market's typical reports -> likely closed
+
+# Recommendations and API.
+recommend:
+  rate_per_km_quintal: 1.0       # Rs per km per quintal (approximate small-truck cost; one way)
+  default_radius_km: 100
+  demand_threshold_pct: 3.0      # price/arrivals moves smaller than this count as "flat"
+  stale_days_warning: 30         # warn when a pair's last real report is older than this vs as_of
+api:
+  cors_origins: ["*"]            # Flutter web; tighten to the app's origin before production
+  demand_note: >-
+    Demand is a PROXY derived from mandi data (predicted modal price change vs predicted
+    arrivals change), not measured consumer demand.

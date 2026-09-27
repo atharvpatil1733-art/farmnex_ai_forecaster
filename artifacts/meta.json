@@ -1,5 +1,5 @@
 {
-  "model_version": "20260927T164231Z-asof20251030",
+  "model_version": "20260927T164602Z-asof20251030",
   "as_of": "2025-10-30",
   "cutoff": "2025-08-31",
   "horizons": [
@@ -546,5 +546,5 @@
     "Thane x Tomato: SARIMAX ok",
     "Thane x Potato: SARIMAX ok"
   ],
-  "train_seconds": 20.0
+  "train_seconds": 19.5
 }

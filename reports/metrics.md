@@ -1,38 +1,38 @@
 # Model metrics
 
-Model version `20260927T164231Z-asof20251030`. Data as_of **2025-10-30**; test = target dates after **2025-08-31** (last 60 days), time split by target date, never random. Metrics use REAL pairs only (synthetic pairs are trained on but never scored). Baseline = seasonal naive (same weekday last week; if that day was not reported, the last reported value). MAE in Rs/quintal (price) or tonnes (arrivals). Training took 20.0 s.
+Model version `20260927T164602Z-asof20251030`. Data as_of **2025-10-30**; test = target dates after **2025-08-31** (last 60 days), time split by target date, never random. Metrics use REAL pairs only (synthetic pairs are trained on but never scored). Baseline = seasonal naive (same weekday last week; if that day was not reported, the last reported value). MAE in Rs/quintal (price) or tonnes (arrivals). Training took 19.5 s.
 
 ## Price
 
 | crop | horizon | n | mae_model | mae_baseline | mape_model | mape_baseline | coverage_p10_p90 | beats_baseline |
 |---|---|---|---|---|---|---|---|---|
-| Onion | 1 | 369 | 126.7 | 137.7 | 12.1 | 12.5 | 65.9 | True |
-| Onion | 2 | 369 | 131.9 | 138.4 | 12.6 | 12.6 | 66.7 | True |
-| Onion | 3 | 369 | 132.7 | 139.9 | 12.6 | 12.8 | 65.9 | True |
-| Potato | 1 | 288 | 121.9 | 154.2 | 8.7 | 10.4 | 69.4 | True |
-| Potato | 2 | 288 | 132.3 | 155.8 | 9.4 | 10.6 | 69.4 | True |
-| Potato | 3 | 288 | 131.3 | 157.8 | 9.3 | 10.8 | 71.5 | True |
-| Tomato | 1 | 177 | 264.1 | 300.8 | 22.5 | 24.3 | 67.2 | True |
-| Tomato | 2 | 177 | 299.1 | 314.8 | 25.0 | 24.9 | 62.7 | True |
-| Tomato | 3 | 177 | 316.5 | 316.5 | 26.6 | 25.0 | 62.1 | False |
-| Onion | all | 1107 | 130.4 | 138.7 | 12.4 | 12.6 | 66.1 | True |
-| Potato | all | 864 | 128.5 | 155.9 | 9.1 | 10.6 | 70.1 | True |
-| Tomato | all | 531 | 293.2 | 310.7 | 24.7 | 24.7 | 64.0 | True |
+| Onion | 1 | 369 | 115.6 | 137.7 | 10.7 | 12.5 | 73.2 | True |
+| Onion | 2 | 369 | 120.1 | 138.4 | 11.1 | 12.6 | 76.2 | True |
+| Onion | 3 | 369 | 121.6 | 139.9 | 11.2 | 12.8 | 75.6 | True |
+| Potato | 1 | 288 | 123.7 | 154.2 | 8.7 | 10.4 | 74.3 | True |
+| Potato | 2 | 288 | 131.3 | 155.8 | 9.2 | 10.6 | 70.8 | True |
+| Potato | 3 | 288 | 130.9 | 157.8 | 9.1 | 10.8 | 75.7 | True |
+| Tomato | 1 | 177 | 279.7 | 300.8 | 23.1 | 24.3 | 60.5 | True |
+| Tomato | 2 | 177 | 323.4 | 314.8 | 26.2 | 24.9 | 61.0 | False |
+| Tomato | 3 | 177 | 345.5 | 316.5 | 28.1 | 25.0 | 59.3 | False |
+| Onion | all | 1107 | 119.1 | 138.7 | 11.0 | 12.6 | 75.0 | True |
+| Potato | all | 864 | 128.6 | 155.9 | 9.0 | 10.6 | 73.6 | True |
+| Tomato | all | 531 | 316.2 | 310.7 | 25.8 | 24.7 | 60.3 | False |
 
-**Crops that do NOT beat the baseline (price):** none
+**Crops that do NOT beat the baseline (price):** Tomato
 
 ## Arrivals
 
 | crop | horizon | n | mae_model | mae_baseline | mape_model | mape_baseline | coverage_p10_p90 | beats_baseline |
 |---|---|---|---|---|---|---|---|---|
-| Onion | 1 | 372 | 98.8 | 109.6 | 41.0 | 54.2 | 65.1 | True |
-| Onion | 2 | 372 | 100.3 | 110.7 | 43.1 | 53.6 | 64.0 | True |
-| Onion | 3 | 372 | 100.6 | 113.6 | 43.1 | 56.9 | 62.6 | True |
-| Potato | 1 | 290 | 38.2 | 54.3 | 75.4 | 89.3 | 63.8 | True |
-| Potato | 2 | 290 | 39.4 | 53.9 | 80.3 | 87.0 | 61.4 | True |
-| Potato | 3 | 290 | 39.4 | 56.3 | 81.5 | 93.5 | 63.1 | True |
-| Onion | all | 1116 | 99.9 | 111.3 | 42.4 | 54.9 | 63.9 | True |
-| Potato | all | 870 | 39.0 | 54.8 | 79.1 | 89.9 | 62.8 | True |
+| Onion | 1 | 372 | 99.4 | 109.6 | 43.2 | 54.2 | 63.2 | True |
+| Onion | 2 | 372 | 100.7 | 110.7 | 45.1 | 53.6 | 61.3 | True |
+| Onion | 3 | 372 | 102.6 | 113.6 | 45.6 | 56.9 | 61.3 | True |
+| Potato | 1 | 290 | 39.4 | 54.3 | 71.1 | 89.3 | 59.3 | True |
+| Potato | 2 | 290 | 39.9 | 53.9 | 78.5 | 87.0 | 59.0 | True |
+| Potato | 3 | 290 | 41.6 | 56.3 | 77.1 | 93.5 | 57.6 | True |
+| Onion | all | 1116 | 100.9 | 111.3 | 44.6 | 54.9 | 61.9 | True |
+| Potato | all | 870 | 40.3 | 54.8 | 75.6 | 89.9 | 58.6 | True |
 
 **Crops that do NOT beat the baseline (arrivals):** none
 

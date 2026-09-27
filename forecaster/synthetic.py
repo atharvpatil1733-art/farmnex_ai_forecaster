@@ -46,6 +46,24 @@ def crop_params(cfg: dict, crop: str, real: pd.DataFrame | None) -> dict:
     return p
 
 
+def _recent_anchor(real: pd.DataFrame | None, crop: str, days: pd.DatetimeIndex, modal: np.ndarray,
+                   n_days: int) -> float:
+    """Scale factor so the synthetic series' recent median matches the real crop's recent median.
+
+    Without this, a synthetic pair follows the average seasonal cycle and can sit far above or
+    below the current real market level (e.g. after a price crash), which would make synthetic
+    markets look like the best place to sell.
+    """
+    if real is None or n_days <= 0:
+        return 1.0
+    start = days[-1] - pd.Timedelta(days=n_days - 1)
+    r = real[(real["commodity"] == crop) & (real["date"] >= start)]["modal_price"].dropna()
+    if len(r) < 10:
+        return 1.0
+    syn = np.median(modal[np.asarray(days >= start)])
+    return float(r.median() / syn) if syn > 0 else 1.0
+
+
 def generate(cfg: dict | None = None, real: pd.DataFrame | None = None,
              end: pd.Timestamp | None = None) -> pd.DataFrame:
     cfg = cfg or load_config()
@@ -81,6 +99,7 @@ def generate(cfg: dict | None = None, real: pd.DataFrame | None = None,
             log_p = (np.log(cp["base_price"] * level) + season + eps + weekday
                      + scfg["monsoon_uplift"] * monsoon + scfg["festival_uplift"] * near)
             modal = np.exp(log_p)
+            modal *= _recent_anchor(real, crop, days, modal, int(scfg.get("anchor_recent_days", 0)))
             spread = rng.uniform(0.15, 0.35)
             arrivals = (cp["base_arrivals"] * size
                         * (modal / (cp["base_price"] * level)) ** (-scfg["price_arrivals_elasticity"])
