@@ -1,4 +1,5 @@
 """Tests for forecaster.data: the cleaned mandi.csv and the prep pipeline on messy input."""
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -19,9 +20,13 @@ def test_mandi_csv_schema_and_keys(mandi):
     assert list(mandi.columns) == MANDI_COLUMNS
     assert pd.api.types.is_datetime64_any_dtype(mandi["date"])
     assert not mandi.duplicated(["date", "market", "commodity"]).any()
-    assert (mandi["modal_price"] > 0).all()
-    assert (mandi["min_price"] <= mandi["modal_price"]).all()
-    assert (mandi["modal_price"] <= mandi["max_price"]).all()
+    priced = mandi[mandi["modal_price"].notna()]
+    assert len(priced) > 0
+    assert (priced["modal_price"] > 0).all()
+    assert (priced["min_price"] <= priced["modal_price"]).all()
+    assert (priced["modal_price"] <= priced["max_price"]).all()
+    # Every row carries at least one observation: a price or arrivals.
+    assert (mandi["modal_price"].notna() | mandi["arrivals_tonnes"].notna()).all()
 
 
 def test_mandi_names_are_canonical(mandi):
@@ -29,12 +34,6 @@ def test_mandi_names_are_canonical(mandi):
     assert set(mandi["market"]) <= set(cfg["markets"])
     assert set(mandi["commodity"]) <= set(cfg["crops"])
     assert mandi["district"].notna().all()
-
-
-def test_tomato_has_no_arrivals(mandi):
-    tomato = mandi[mandi["commodity"] == "Tomato"]
-    assert len(tomato) > 0
-    assert tomato["arrivals_tonnes"].isna().all()
 
 
 def test_onion_potato_have_arrivals(mandi):
@@ -80,11 +79,36 @@ Price Date,Market Name,Commodity,Arrivals (Quintals)
     tomato = df[df["commodity"] == "Tomato"].iloc[0]
     assert tomato["market"] == "Khed(Chakan)"
     assert (tomato["min_price"], tomato["max_price"]) == (700, 900)  # swapped
-    assert np.isnan(tomato["arrivals_tonnes"])  # tomato has_arrivals: false
+    assert tomato["arrivals_tonnes"] == pytest.approx(3.0)  # real qty data is used when present
 
     assert rep.unknown_markets["Somewhere Else"] == 1
     assert rep.dropped["exact duplicate price row (overlapping exports)"] == 1
     assert rep.dropped["unparseable date (footer/total rows)"] >= 1
+
+
+def test_has_arrivals_false_forces_nan(tmp_path):
+    cfg = copy.deepcopy(load_config())
+    cfg["crops"]["Tomato"]["has_arrivals"] = False
+    _write(tmp_path / "p.csv", "t,cmdty,market_name,p_min,p_max,p_modal\n2025-06-01,Tomato,Pune,900,1100,1000")
+    _write(tmp_path / "q.csv", "t,cmdty,market_name,qty\n2025-06-01,Tomato,Pune,40")
+    df, _ = prepare(cfg, raw_dir=tmp_path)
+    assert df["arrivals_tonnes"].isna().all()
+
+
+def test_arrivals_only_days_are_kept(tmp_path):
+    cfg = load_config()
+    _write(tmp_path / "p.csv", "t,cmdty,market_name,p_min,p_max,p_modal\n2025-06-02,Onion,Pune,900,1100,1000")
+    _write(tmp_path / "q.csv", "t,cmdty,market_name,qty\n2025-06-01,Onion,Pune,800\n2025-06-02,Onion,Pune,850")
+    df, rep = prepare(cfg, raw_dir=tmp_path)
+    assert len(df) == 2
+    first = df.sort_values("date").iloc[0]
+    assert np.isnan(first["modal_price"]) and first["arrivals_tonnes"] == 800
+    assert len(rep.orphan_arrivals) == 1
+
+    cfg = copy.deepcopy(cfg)
+    cfg["data_prep"]["keep_arrivals_only_rows"] = False
+    df, rep = prepare(cfg, raw_dir=tmp_path)
+    assert len(df) == 1 and df["modal_price"].notna().all()
 
 
 def test_prepare_drops_outlier(tmp_path):

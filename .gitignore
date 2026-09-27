@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+venv/
+
+# secrets
+.env
+
+# raw CEDA API responses: large and re-downloadable with `python -m forecaster.ceda`
+data/raw/ceda/

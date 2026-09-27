@@ -7,6 +7,27 @@ paths:
   ref_dir: data/ref
   artifacts_dir: artifacts
   reports_dir: reports
+  ceda_cache_dir: data/raw/ceda     # raw API responses (JSON), git-ignored, rebuilt by forecaster.ceda
+  exports_dir: data/raw             # manual website exports (*.csv/xls/xlsx), fallback only
+
+# CEDA (Ashoka University) Agmarknet API: the PRIMARY real-data source.
+# `python -m forecaster.ceda` downloads into ceda_cache_dir; `python -m forecaster.data` cleans it.
+# Needs CEDA_API_KEY in the environment or .env (free key: https://api.ceda.ashoka.edu.in).
+# Terms: free for non-commercial use; any chart/app using this data must show the CEDA logo
+# (bottom right) and the text credit below, and must not imply CEDA endorses us.
+ceda:
+  base_url: https://api.ceda.ashoka.edu.in/v1
+  state: Maharashtra
+  districts: [Pune]                 # add Thane / Mumbai here to fetch Vashi and Kalyan
+  start_date: "2012-01-01"          # fetch window start; modelling decides what it trains on
+  end_date: null                    # null = today (CEDA lags weeks to months behind)
+  chunk_years: 5                    # multi-year requests are accepted; fewer requests = safer
+  max_requests_per_run: 36          # live policy is 40 requests / rolling hour; keep headroom
+  min_seconds_between_requests: 1.0
+  min_chunk_days: 60                # truncated chunks are split in half down to this size
+  suspicious_row_counts: [999, 1000, 5000, 10000, 50000]
+  refresh_open_chunk: true          # re-fetch the chunk that ends at end_date on each run
+  attribution: "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
 
 # Canonical market names. `aliases` are raw spellings seen in Agmarknet / data.gov.in exports
 # (matched case-insensitively after trimming spaces). `in_raw_data: false` = no real data yet,
@@ -35,25 +56,36 @@ markets:
 # (e.g. values that look like Rs/kg); they never drop or convert rows by themselves.
 crops:
   Onion:
+    ceda_name: Onion          # exact commodity_name in CEDA /agmarknet/commodities
     aliases: ["Onion", "Onion Red", "Onion (Red)", "Red Onion", "Onion Green", "Kanda"]
     has_arrivals: true
     plausible_modal_min: 300
     plausible_modal_max: 8000
   Tomato:
+    ceda_name: Tomato
     aliases: ["Tomato", "Tamatar", "Tomato Hybrid", "Tomato Local"]
-    # Only price exports exist for tomato (2025 onwards); keep arrivals empty.
-    has_arrivals: false
+    # The old website exports had no tomato quantity file. The API quantities endpoint may have
+    # it; arrivals stay empty only if no quantity data exists (never invented).
+    has_arrivals: true
     plausible_modal_min: 200
     plausible_modal_max: 8000
   Potato:
+    ceda_name: Potato
     aliases: ["Potato", "Batata", "Aloo", "Potato Local"]
     has_arrivals: true
     plausible_modal_min: 300
     plausible_modal_max: 6000
 
 data_prep:
+  # Which raw data to clean: "ceda" = API cache only, "exports" = manual website exports only,
+  # "auto" = API cache if it has any files, else the exports. Never both (same underlying
+  # Agmarknet data; mixing them double-counts).
+  source: auto
+  # Keep market-days that have arrivals but no price (modal_price = NaN). The arrivals model
+  # needs them; the price model trains only on rows where modal_price was reported.
+  keep_arrivals_only_rows: true
   # Unit of arrivals in the raw quantity exports when the column name does not say it.
-  # data.gov.in "qty" for Pune APMC (~900/day onion) is consistent with tonnes, not quintals.
+  # CEDA/data.gov.in "qty" for Pune APMC (~900/day onion) is consistent with tonnes, not quintals.
   default_arrivals_unit: tonnes
   outlier_window_days: 30        # rolling median window (calendar days, centred)
   outlier_min_points: 5          # need at least this many prices in the window to judge
@@ -62,3 +94,10 @@ data_prep:
   low_coverage_warn_pct: 50      # warn when a market x crop reports on < 50% of days
   long_gap_days: 14              # gaps longer than this are listed; never interpolated
   suspicious_row_counts: [500, 1000, 5000, 10000]  # exports capped at these sizes are likely truncated
+
+# Used by features/train (next step). Kept here so nothing is hardcoded.
+modelling:
+  train_start: "2015-01-01"      # older history is fetched but not trained on by default
+  horizons: [1, 2, 3]            # calendar days ahead; DIRECT forecasts, never recursive
+  quantiles: [0.1, 0.5, 0.9]
+  test_days: 60                  # time split: last 60 days of real data are the test set

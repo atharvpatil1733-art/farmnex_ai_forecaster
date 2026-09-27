@@ -1,15 +1,22 @@
 """Mandi data preparation and loading.
 
-`python -m forecaster.data` turns every export in data/raw/ (Agmarknet / data.gov.in price and
-quantity files, csv/xls/xlsx) into data/raw/mandi.csv and writes reports/data_quality.md.
+`python -m forecaster.data` turns the raw data into data/raw/mandi.csv and writes
+reports/data_quality.md. Raw data comes from ONE source (config `data_prep.source`):
+  * "ceda": JSON cached by `python -m forecaster.ceda` (CEDA Agmarknet API, full history), or
+  * "exports": manual Agmarknet / CEDA website exports in data/raw/ (csv/xls/xlsx, often
+    truncated at ~1000 rows), or
+  * "auto": the API cache if it has files, else the exports.
 
 Output schema, one row per (date, market, commodity), prices in Rs/quintal:
     date, district, market, commodity, min_price, max_price, modal_price, arrivals_tonnes
+modal_price may be NaN on arrivals-only market-days (config `keep_arrivals_only_rows`);
+price models must train only on rows where modal_price is present.
 Missing days stay missing; nothing is interpolated or forward-filled here.
 """
 from __future__ import annotations
 
 import csv
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -111,6 +118,7 @@ class PrepReport:
     notes: list[str] = field(default_factory=list)
     rows_in_price: int = 0
     rows_in_qty: int = 0
+    source: str = "exports"
     orphan_arrivals: pd.DataFrame | None = None
 
 
@@ -148,8 +156,85 @@ def _parse_dates(df: pd.DataFrame, rep: PrepReport) -> pd.DataFrame:
     return df[~bad]
 
 
-def load_raw(cfg: dict, raw_dir: Path, rep: PrepReport) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Read all raw exports and split them into price rows and quantity rows."""
+def load_raw(cfg: dict, raw_dir: Path, rep: PrepReport,
+             ceda_dir: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Pick ONE raw source per config `data_prep.source` and return (price rows, quantity rows)."""
+    source = cfg["data_prep"].get("source", "auto")
+    has_ceda = ceda_dir is not None and any(Path(ceda_dir).glob("price/*.json"))
+    if source == "ceda" or (source == "auto" and has_ceda):
+        if not has_ceda:
+            raise FileNotFoundError(f"no CEDA price files in {ceda_dir}; run python -m forecaster.ceda")
+        rep.source = "ceda"
+        return load_ceda(cfg, Path(ceda_dir), rep)
+    rep.source = "exports"
+    return load_exports(cfg, raw_dir, rep)
+
+
+_QTY_KEYS = ("quantity", "qty", "arrivals", "arrival_quantity", "arrival", "value")
+
+
+def load_ceda(cfg: dict, ceda_dir: Path, rep: PrepReport) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read the JSON cache written by forecaster.ceda into the same shape as the exports."""
+    names: dict[int, str] = {}
+    for f in sorted((ceda_dir / "ref").glob("markets_*.json")):
+        for m in json.loads(f.read_text()):
+            if m.get("market_id") is not None and m.get("market_name"):
+                names[int(m["market_id"])] = str(m["market_name"])
+    caps = set(cfg["ceda"].get("suspicious_row_counts", []))
+    unit = cfg["data_prep"].get("default_arrivals_unit", "tonnes")
+    frames: dict[str, list[pd.DataFrame]] = {"price": [], "quantity": []}
+    for indicator in frames:
+        for f in sorted((ceda_dir / indicator).glob("*.json")):
+            payload = json.loads(f.read_text())
+            recs = pd.DataFrame(payload.get("records") or [])
+            info = {"file": f"ceda/{indicator}/{f.name}", "rows": len(recs), "kind": indicator,
+                    "truncated": len(recs) in caps}
+            if recs.empty:
+                rep.files.append(info)
+                continue
+            if "market_id" not in recs:
+                rep.notes.append(f"`{f.name}`: rows have no market_id (district/state aggregate?), skipped.")
+                rep.files.append(info)
+                continue
+            no_mkt = recs["market_id"].isna()
+            if no_mkt.any():
+                rep.dropped["CEDA aggregate row without market_id"] += int(no_mkt.sum())
+                recs = recs[~no_mkt]
+            ids = recs["market_id"].astype(int)
+            fallback = recs["market_name"] if "market_name" in recs else pd.Series(None, index=recs.index)
+            df = pd.DataFrame({
+                "date": recs["date"].astype(str).str[:10],
+                "market": ids.map(names).fillna(fallback).fillna(ids.map(lambda i: f"market_id {i}")),
+                "commodity": payload.get("crop"),
+            })
+            if indicator == "price":
+                for c in ("min_price", "max_price", "modal_price"):
+                    df[c] = pd.to_numeric(recs.get(c), errors="coerce")
+                df["variety"] = recs["variety"].astype(str) if "variety" in recs else "NA"
+            else:
+                key = next((k for k in _QTY_KEYS if k in recs), None)
+                if key is None:
+                    rep.notes.append(f"`{f.name}`: no quantity column in {sorted(recs.columns)}; skipped. "
+                                     "Add the field name to _QTY_KEYS in forecaster/data.py.")
+                    rep.files.append(info)
+                    continue
+                q = pd.to_numeric(recs[key], errors="coerce")
+                df["arrivals_tonnes"] = q / 10.0 if unit == "quintals" else q
+                info["unit"] = unit
+            d = pd.to_datetime(df["date"], errors="coerce")
+            if d.notna().any():
+                info["first"], info["last"] = d.min().date(), d.max().date()
+            rep.files.append(info)
+            frames[indicator].append(df)
+    empty_p = pd.DataFrame(columns=["date", "market", "commodity", "variety",
+                                    "min_price", "max_price", "modal_price"])
+    empty_q = pd.DataFrame(columns=["date", "market", "commodity", "arrivals_tonnes"])
+    return (pd.concat(frames["price"], ignore_index=True) if frames["price"] else empty_p,
+            pd.concat(frames["quantity"], ignore_index=True) if frames["quantity"] else empty_q)
+
+
+def load_exports(cfg: dict, raw_dir: Path, rep: PrepReport) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read all manual website exports and split them into price rows and quantity rows."""
     prices, qtys = [], []
     caps = set(cfg["data_prep"].get("suspicious_row_counts", []))
     default_unit = cfg["data_prep"].get("default_arrivals_unit", "tonnes")
@@ -272,11 +357,14 @@ def clean_quantities(q: pd.DataFrame, cfg: dict, rep: PrepReport) -> pd.DataFram
     return q.groupby(["date", "market", "commodity"], as_index=False)["arrivals_tonnes"].sum()
 
 
-def prepare(cfg: dict | None = None, raw_dir: Path | None = None) -> tuple[pd.DataFrame, PrepReport]:
+def prepare(cfg: dict | None = None, raw_dir: Path | None = None,
+            ceda_dir: Path | None = None) -> tuple[pd.DataFrame, PrepReport]:
     cfg = cfg or load_config()
-    raw_dir = Path(raw_dir or ROOT / cfg["paths"]["raw_dir"])
+    if ceda_dir is None and raw_dir is None and "ceda_cache_dir" in cfg["paths"]:
+        ceda_dir = ROOT / cfg["paths"]["ceda_cache_dir"]
+    raw_dir = Path(raw_dir or ROOT / cfg["paths"].get("exports_dir", cfg["paths"]["raw_dir"]))
     rep = PrepReport()
-    p_raw, q_raw = load_raw(cfg, raw_dir, rep)
+    p_raw, q_raw = load_raw(cfg, raw_dir, rep, ceda_dir)
     p = clean_prices(p_raw, cfg, rep)
     q = clean_quantities(q_raw, cfg, rep)
 
@@ -287,11 +375,16 @@ def prepare(cfg: dict | None = None, raw_dir: Path | None = None) -> tuple[pd.Da
                          f"with has_arrivals: false ({', '.join(no_arrivals)}).")
         q = q[~forced]
 
-    df = p.merge(q, on=["date", "market", "commodity"], how="left")
-    orphan = q.merge(p[["date", "market", "commodity"]], how="left", indicator=True)
-    orphan = orphan[orphan["_merge"] == "left_only"]
-    rep.dropped["arrivals-only market-day (no price row that day)"] += len(orphan)
-    rep.orphan_arrivals = orphan.drop(columns="_merge")
+    keys = ["date", "market", "commodity"]
+    orphan = q.merge(p[keys], how="left", indicator=True)
+    orphan = orphan[orphan["_merge"] == "left_only"].drop(columns="_merge")
+    rep.orphan_arrivals = orphan
+    if cfg["data_prep"].get("keep_arrivals_only_rows", False):
+        # Arrivals model needs these days; price model filters on modal_price.notna().
+        df = p.merge(q, on=keys, how="outer")
+    else:
+        df = p.merge(q, on=keys, how="left")
+        rep.dropped["arrivals-only market-day (no price row that day)"] += len(orphan)
 
     df.loc[df["commodity"].isin(no_arrivals), "arrivals_tonnes"] = np.nan
     districts = {m: spec.get("district") for m, spec in cfg["markets"].items()}
@@ -330,11 +423,13 @@ def coverage_table(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     rows = []
     for market in cfg["markets"]:
         for crop in cfg["crops"]:
-            g = df[(df["market"] == market) & (df["commodity"] == crop)].sort_values("date")
+            pair = df[(df["market"] == market) & (df["commodity"] == crop)]
+            g = pair[pair["modal_price"].notna()].sort_values("date")  # price days only
             if g.empty:
                 rows.append({"market": market, "crop": crop, "first": "", "last": "",
                              "reported_days": 0, "span_days": 0, "coverage_pct": 0.0,
-                             "arrivals_pct": "", "longest_gap_days": "", "gaps_gt_14d": "",
+                             "arrivals_pct": "", "arrivals_only_days": len(pair),
+                             "longest_gap_days": "", "gaps_gt_14d": "",
                              "status": "MISSING (synthetic fallback)"})
                 continue
             span = (g["date"].max() - g["date"].min()).days + 1
@@ -349,7 +444,8 @@ def coverage_table(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
                 "first": g["date"].min().date(), "last": g["date"].max().date(),
                 "reported_days": len(g), "span_days": span, "coverage_pct": round(cov, 1),
                 "arrivals_pct": round(100 * g["arrivals_tonnes"].notna().mean(), 1) if has_arr
-                else "n/a (no qty data)",
+                else "n/a (has_arrivals: false)",
+                "arrivals_only_days": len(pair) - len(g),
                 "longest_gap_days": int(gaps.max()) if len(gaps) else 0,
                 "gaps_gt_14d": int((gaps > dp["long_gap_days"]).sum()),
                 "status": status,
@@ -365,10 +461,16 @@ def write_report(df: pd.DataFrame, rep: PrepReport, cfg: dict, path: Path) -> No
            "Generated by `python -m forecaster.data` (agmarknet-data-prep). "
            "Prices are Rs/quintal, arrivals in tonnes.", ""]
 
+    src = ("CEDA Agmarknet API cache (`python -m forecaster.ceda`)" if rep.source == "ceda"
+           else "manual website exports in data/raw/ (fallback; run `python -m forecaster.ceda` "
+                "for full history)")
+    has_price = df["modal_price"].notna()
     out += ["## Summary", "",
+            f"- Source: **{src}**",
             f"- Raw price rows read: **{rep.rows_in_price}**; raw quantity rows read: "
             f"**{rep.rows_in_qty}**",
-            f"- Rows in mandi.csv (one per date x market x crop): **{len(df)}**",
+            f"- Rows in mandi.csv (one per date x market x crop): **{len(df)}** "
+            f"({int(has_price.sum())} with a price, {int((~has_price).sum())} arrivals-only)",
             f"- Date range: **{df['date'].min().date()} to {df['date'].max().date()}**",
             f"- Markets with real data: {df['market'].nunique()} "
             f"({', '.join(sorted(df['market'].unique()))})",
@@ -376,37 +478,46 @@ def write_report(df: pd.DataFrame, rep: PrepReport, cfg: dict, path: Path) -> No
             f"- Rows with arrivals: {int(df['arrivals_tonnes'].notna().sum())} "
             f"({100 * df['arrivals_tonnes'].notna().mean():.1f}%)", ""]
     for crop in cfg["crops"]:
-        g = df[df["commodity"] == crop]
+        g = df[(df["commodity"] == crop) & df["modal_price"].notna()]
         if g.empty:
             continue
         months = g["date"].dt.to_period("M").astype(str).value_counts().sort_index()
         runs = _month_runs(list(months.index))
-        out.append(f"- **{crop}**: {len(g)} market-days, months present: {runs}; "
-                   f"arrivals on {int(g['arrivals_tonnes'].notna().sum())} rows")
+        out.append(f"- **{crop}**: {len(g)} priced market-days, months present: {runs}; "
+                   f"arrivals on {int(df.loc[df['commodity'] == crop, 'arrivals_tonnes'].notna().sum())} rows")
     out.append("")
 
     trunc = files[files["truncated"]] if not files.empty else files
     out += ["## Important findings", ""]
-    if not trunc.empty:
+    if not trunc.empty and rep.source == "exports":
         out.append(f"- **Truncated exports:** {len(trunc)} of {len(files)} files have exactly "
                    f"{sorted(trunc['rows'].unique().tolist())} data rows, a typical download cap. "
                    "Each keeps only the newest rows, so older dates are missing (see the per-file "
-                   "date ranges below). Re-export in smaller windows (e.g. one quarter per file) "
-                   "to recover the full history.")
+                   "date ranges below). Fix: `python -m forecaster.ceda` (API, full history).")
+    elif not trunc.empty:
+        out.append(f"- **Possibly capped API responses:** {len(trunc)} window(s) returned a round "
+                   f"row count {sorted(trunc['rows'].unique().tolist())}. Lower `ceda.min_chunk_days` "
+                   "or `ceda.chunk_years` and rerun `python -m forecaster.ceda`.")
     for note in rep.notes:
         out.append(f"- {note}")
     for crop in cfg["crops"]:
-        seen = set(df.loc[df["commodity"] == crop, "date"].dt.month)
+        seen = set(df.loc[(df["commodity"] == crop) & df["modal_price"].notna(), "date"].dt.month)
         if seen:
             never = [pd.Timestamp(2000, m, 1).strftime("%b") for m in range(1, 13) if m not in seen]
-            out.append(f"- **{crop}**: no real data at all for calendar month(s) "
-                       f"{', '.join(never) or 'none'}; seasonal (monthly) models will lean on "
-                       "synthetic data or fallbacks for those months.")
-    no_arr = [c for c, s in cfg["crops"].items() if not s.get("has_arrivals", True)]
-    for crop in no_arr:
-        n = int(df.loc[df["commodity"] == crop, "arrivals_tonnes"].notna().sum())
-        out.append(f"- **{crop}** has no quantity data: arrivals_tonnes is left empty (NaN) on all "
-                   f"rows ({n} non-empty). Arrivals were not estimated or invented.")
+            if never:
+                out.append(f"- **{crop}**: no real prices for calendar month(s) {', '.join(never)}; "
+                           "seasonal (monthly) models will lean on synthetic data or fallbacks there.")
+    for crop, spec in cfg["crops"].items():
+        g = df[df["commodity"] == crop]
+        if g.empty:
+            continue
+        n = int(g["arrivals_tonnes"].notna().sum())
+        if not spec.get("has_arrivals", True):
+            out.append(f"- **{crop}**: `has_arrivals: false` in config, arrivals_tonnes forced empty.")
+        elif n == 0:
+            out.append(f"- **{crop}**: no quantity data found, arrivals_tonnes is empty (NaN) on all "
+                       "rows. Arrivals were not estimated or invented; the arrivals model and the "
+                       "demand signal fall back to synthetic data for this crop.")
     out.append("- Missing days (Sundays, holidays, non-reporting) are left missing; "
                "nothing is interpolated or forward-filled.")
     out.append("")
@@ -472,10 +583,14 @@ def write_report(df: pd.DataFrame, rep: PrepReport, cfg: dict, path: Path) -> No
         o = (orphan.groupby(["commodity", "market"]).agg(
                 rows=("date", "size"), first=("date", "min"), last=("date", "max")).reset_index())
         o["first"], o["last"] = o["first"].dt.date, o["last"].dt.date
-        out += ["## Arrivals without a price row (dropped)", "",
-                "mandi.csv requires a modal price, so these arrivals-only market-days are not "
-                "kept. Most come from quantity exports reaching further back than the matching "
-                "price export (both truncated at the row cap).", "", _md_table(o), ""]
+        if cfg["data_prep"].get("keep_arrivals_only_rows", False):
+            out += ["## Arrivals without a price row (kept, modal_price empty)", "",
+                    "Kept for the arrivals model (`data_prep.keep_arrivals_only_rows: true`). "
+                    "Price models must filter on `modal_price.notna()`.", "", _md_table(o), ""]
+        else:
+            out += ["## Arrivals without a price row (dropped)", "",
+                    "`keep_arrivals_only_rows` is false, so these market-days are not kept.",
+                    "", _md_table(o), ""]
     path.write_text("\n".join(out))
 
 
