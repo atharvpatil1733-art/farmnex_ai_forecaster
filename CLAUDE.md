@@ -27,9 +27,12 @@ simple rules for SARIMAX), and `data_source`: "real" or "synthetic".
 - data/raw/mandi.csv (real, may be missing at first). Schema:
   date, district, market, commodity, min_price, max_price, modal_price, arrivals_tonnes
   data.py must normalize messy market/crop names and column names from Agmarknet exports.
-- If data/raw/mandi.csv is absent, synthetic.py generates 3 years of daily data per
-  market x crop with realistic seasonality (monsoon spikes, festival demand, weekday
-  effects, arrivals inversely related to price) into data/synthetic/. Label it synthetic.
+- synthetic.py generates 3 years of daily data per market x crop with realistic seasonality
+  (monsoon spikes, festival demand, weekday effects, arrivals inversely related to price)
+  into data/synthetic/. Fallback is PER market x crop: use real data where it exists,
+  synthetic only for pairs with no real data. Every response reports data_source per pair.
+- Real data (CEDA/Agmarknet) has gaps: markets report ~4-5 days/week, some weeks less.
+  This is expected. Check arrival units (tonnes vs quintals) and convert to tonnes.
 - data/ref/: markets.csv (market, district, lat, lon), crop_calendar.csv
   (crop, sowing_months, duration_days), festivals.csv (date, name). Create these yourself
   with approximate values and mark them "approximate" in data/README.md.
@@ -39,6 +42,13 @@ simple rules for SARIMAX), and `data_source`: "real" or "synthetic".
 - Main: one global LightGBM per target (price, arrivals), market & crop categorical,
   quantile objective for p10/p50/p90. Features: lags 1,2,3,7,14; rolling mean/std 7,14,28
   (shift(1) before rolling); day-of-week, month, festival within 3 days, monsoon flag.
+- GAPS: before features, reindex each market x crop to a full daily calendar. Lags and
+  rolling windows are by CALENDAR DAYS, never by row position. Leave missing days as NaN
+  (LightGBM handles NaN); add days_since_last_report and reports_last_7d features.
+  Train only on rows where the target was actually reported. Rolling stats need >= 3 points.
+- Forecast days +1..+3 are calendar days; mark a day `likely_closed` if that market
+  historically rarely reports on that weekday, and skip it when choosing the best day.
+- If a market x crop has a gap > 14 days, don't interpolate across it.
 - Validation: time split, last 60 days as test. Never random split.
 - Write reports/metrics.md: MAE, MAPE per crop vs baseline. Flag crops that don't beat it.
 
