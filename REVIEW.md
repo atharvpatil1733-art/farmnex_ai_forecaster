@@ -1,13 +1,13 @@
 # REVIEW: farmnex_ai_forecaster end-to-end build
 
 Everything runs end to end:
-- `python -m forecaster.ceda` downloads the data with 18 API requests.
+- `python -m forecaster.ceda` downloads the data: 18 API requests for Pune, then 18 more for Thane and Mumbai.
 - `python -m forecaster.data` cleans it.
-- `python -m forecaster.train` takes 42 s on 4 CPUs.
+- `python -m forecaster.train` takes 48 s on 4 CPUs.
 - `uvicorn app.main:app` serves all 6 endpoints, and each one returned 200 on a live run (`reports/sample_responses.md`).
-- `python -m pytest -q` passes 44 tests.
+- `python -m pytest -q` passes 56 tests.
 
-**The data is now full CEDA API history: 2012-01-01 to 2025-10-30, Pune district, 54,580 rows.**
+**The data is full CEDA API history: 2012-01-01 to 2025-10-30, districts Pune, Thane and Mumbai, 72,439 rows. Vashi and Kalyan now have real prices.**
 
 ## 1. CEDA outcome
 
@@ -25,14 +25,32 @@ Everything runs end to end:
   - It is in tonnes: Pune onion on 2024-10-30 is 892.2, the same value as in the old export.
   - **Tomato now has real arrivals.**
 - **CEDA lags about 11 months:** the newest data is 2025-10-30, so forecasts start from that date.
-- **4 market ids have no name** (checklist item 2). None of them appears in any old export, and the `/markets` lookup hangs, so they are listed as unknown and dropped:
+- **Every market id now has a name.** On 2026-09-28 the `/agmarknet/markets` lookup answered (it hung the day before). The downloader now asks it once per district and caches the answer. A failure is only logged, and it is never used to filter data.
+  - Id 3110 is **Pune(Hadapsar)**: 4,621 rows, 2012 to 2020-05-14.
+  - Ids 1454, 1456 and 2385 are Dound, Nira and Mulshi (26 rows in total).
+  - None of these is modelled: Hadapsar stopped reporting in 2020, and the other three are too small. They are listed in `config.yaml`.
 
-  | CEDA id | Rows | Dates | Note |
-  |---|---|---|---|
-  | 3110 | 4,621 | 2012 to 2020-05-14 | Probably the old id of Manjri or Moshi: both new ids start 1–4 days after it ends. I did not guess which. |
-  | 1454, 1456, 2385 | 26 in total | scattered | Too small to matter. |
+### Thane and Mumbai (added 2026-09-28)
 
-  If you know which market 3110 is, add `"market_id 3110"` to that market's `aliases` in `config.yaml`, then rerun `python -m forecaster.data && python -m forecaster.train`.
+- **Config:** `ceda.districts: [Pune, Thane, Mumbai]`. CEDA district ids are 517 (Thane) and 519 (Mumbai); "Mumbai Suburban" (518) was not asked for.
+- **Cache fix in `forecaster/ceda.py`:** cached files did not record which districts they covered, so adding a district would have silently re-used the Pune-only files.
+  - Each file now records the districts it covers.
+  - Only districts that are missing get fetched, all in one request per window.
+  - The open window is refreshed only when its copy is older than `refresh_open_chunk_hours` (24).
+  - Mocked tests cover this.
+- **Download:** one run, **18 requests**, 37,387 raw rows, no failures. Three more single requests named the markets.
+- **Vashi** is the Mumbai APMC at Vashi, Navi Mumbai. CEDA files it under district Mumbai with two ids:
+  - 3108 "Vashi New Mumbai" is the onion-potato market.
+  - 162 "Mumbai" is the vegetable market, and has most of the tomato.
+  - Both were already aliases of Vashi. They overlap on only 17 onion days.
+  - Arrivals look right: a median of about 1,030 t a day of onion and 1,120 t of potato.
+- **Kalyan** (CEDA 177, district Thane) has real prices from 2012 to 2025.
+  - **Its quantity reports are placeholders:** 0.1–1.3 t a day, often the same number for all three crops.
+  - So `markets.Kalyan.has_arrivals: false` keeps them out, and its `arrivals_tonnes` stays empty. Nothing was estimated in mandi.csv.
+  - As CLAUDE.md specifies, the arrivals model uses synthetic arrivals for Kalyan (reported as `arrivals_source: synthetic`).
+  - Sell-options says "no reliable arrivals data for Kalyan" rather than guessing how big the market is.
+- **Other Thane markets are not modelled:** Bhivandi, Vasai, Ulhasnagar, Murbad, Palghar and Shahapur. They have old or sparse data, mostly ending 2016–17. Add them to `markets:` if you want them.
+- **In the API,** `/meta` districts are now Pune and Thane. Vashi is kept in district Thane, where it is on the map.
 
 ## 2. Metrics
 
@@ -40,15 +58,24 @@ These are leak-free and scored on real pairs only. The test period is 2025-09-01
 
 | Target | Crop | n | MAE model | MAE baseline | MAPE model | MAPE baseline | p10–p90 coverage |
 |---|---|---|---|---|---|---|---|
-| price | Onion | 1107 | 112.2 | 138.7 | 10.3% | 12.6% | 81.8% |
-| price | Potato | 870 | 126.8 | 156.2 | 8.7% | 10.6% | 78.9% |
-| price | Tomato | 1032 | 242.2 | 317.6 | 18.1% | 23.6% | 80.8% |
-| arrivals | Onion | 1116 | 86.7 | 111.3 | 39.0% | 54.9% | 78.1% |
-| arrivals | Potato | 870 | 38.1 | 54.8 | 64.1% | 89.9% | 74.7% |
-| arrivals | Tomato | 1032 | 17.0 | 24.9 | 34.0% | 37.3% | 79.1% |
+| price | Onion | 1326 | 108.0 | 131.8 | 9.8% | 11.9% | 81.5% |
+| price | Potato | 996 | 121.0 | 148.8 | 8.3% | 10.2% | 78.2% |
+| price | Tomato | 1254 | 267.9 | 360.1 | 22.7% | 30.4% | 77.6% |
+| arrivals | Onion | 1239 | 96.8 | 130.0 | 37.1% | 52.4% | 75.6% |
+| arrivals | Potato | 996 | 58.4 | 85.7 | 61.9% | 82.2% | 74.4% |
+| arrivals | Tomato | 1155 | 17.9 | 27.8 | 33.0% | 36.2% | 79.1% |
 
 - **Every crop beats the baseline on MAE and MAPE, at every horizon.** No crop is flagged. Per-horizon rows are in `reports/metrics.md`.
-- **The p10–p90 intervals now cover about 80% of actual values**, which is what they should. On the old export data they covered only about 65%.
+- **The p10–p90 intervals cover about 75–82% of actual values**, close to the 80% they should. On the old export data they covered only about 65%.
+- **The test set now also includes Vashi and Kalyan**, so these numbers are not directly comparable with the Pune-only run:
+
+  | Crop | Price MAE (Pune only) | Price MAE (with Vashi, Kalyan) | Price MAPE (Pune only) | Price MAPE (with Vashi, Kalyan) |
+  |---|---|---|---|---|
+  | Onion | 112.2 | 108.0 | 10.3% | 9.8% |
+  | Potato | 126.8 | 121.0 | 8.7% | 8.3% |
+  | Tomato | 242.2 | 267.9 | 18.1% | 22.7% |
+
+  Tomato error went up. Kalyan tomato is jumpy: in the sample response the latest price is ₹1,750 against a 14-day average of ₹1,058.
 - **Change from the export-only build:**
 
   | Crop | Price MAE before | Price MAE now |
@@ -57,11 +84,11 @@ These are leak-free and scored on real pairs only. The test period is 2025-09-01
   | Potato | 132 | 127 |
   | Tomato | 286 | 242 |
 
-- **The SARIMAX crop model now runs for every Pune crop.** Before, it fell back to historical averages.
+- **The SARIMAX crop model runs for every crop in Pune and Thane.**
 
 ## 3. Real vs synthetic per market x crop
 
-Each cell is price source / arrivals source, with the number of real price days in brackets. A pair needs at least 30 real days to count as "real". 33 of 48 pairs have real prices and 33 have real arrivals.
+Each cell is price source / arrivals source, with the number of real price days in brackets. A pair needs at least 30 real days to count as "real". 39 of 48 pairs have real prices and 36 have real arrivals.
 
 | Market | Onion | Tomato | Potato |
 |---|---|---|---|
@@ -79,10 +106,10 @@ Each cell is price source / arrivals source, with the number of real price days 
 | Baramati | real / real (462 d) | synth / synth (0 d) | synth / synth (0 d) |
 | Shirur | real / real (53 d) | synth / synth (0 d) | synth / synth (0 d) |
 | Indapur | real / real (620 d) | synth / synth (0 d) | synth / synth (0 d) |
-| Vashi | synth / synth (0 d) | synth / synth (0 d) | synth / synth (0 d) |
-| Kalyan | synth / synth (0 d) | synth / synth (0 d) | synth / synth (0 d) |
+| Vashi | real / real (3685 d) | real / real (2353 d) | real / real (3781 d) |
+| Kalyan | real / synth (2409 d) | real / synth (2326 d) | real / synth (1717 d) |
 
-Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would cost about 6 more requests.
+Kalyan's arrivals show as synthetic because its CEDA quantity reports are placeholders (see §1).
 
 ## 4. Assumptions and approximate values
 
@@ -109,7 +136,7 @@ Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would
 
    It still needs agronomist sign-off.
 6. **Festival dates (2012–2027) are approximate**; lunar festivals can be a day off.
-7. **Synthetic data covers only the 15 pairs with no real data:**
+7. **Synthetic data covers only the pairs with no real data:** 9 pairs for prices, 12 for arrivals.
    - 3 years, rescaled so its recent level matches the real crop level;
    - each synthetic pair is labelled `synthetic` in every response.
 8. **LightGBM uses defaults with no tuning.** The global models train on real and synthetic rows (with an `is_synthetic` flag) and are scored on real rows only. Served models are refit on all rows.
@@ -136,8 +163,9 @@ Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would
 ## 5. Known limitations
 
 - **Stale data:** forecasts are for 31 Oct – 2 Nov 2025 because CEDA ends at 2025-10-30. A live feed (data.gov.in) is the next step.
-- **Unknown market id 3110** (about 4,600 rows, 2012–2020) is dropped until someone names it.
-- **15 pairs have no real prices**, including all of Vashi and Kalyan (Thane). By default they are hidden from every answer; with `api.show_synthetic: true` they appear, labelled `synthetic`, and their numbers are illustrative only.
+- **Pune(Hadapsar)** (id 3110, about 4,600 rows, 2012–2020) is named but not modelled, because it stopped reporting.
+- **9 pairs have no real prices:** tomato and potato at the small outer Pune markets. By default they are hidden from every answer. With `api.show_synthetic: true` they appear, labelled `synthetic`, and their numbers are illustrative only.
+- **Kalyan has no reliable arrivals,** so its demand signal leans on synthetic arrivals, and its market size can't be checked for a sale.
 - **Crop ranking ignores yield per acre and input costs.** It compares ₹/quintal only.
 - **Reasons are in English only.** Marathi is not done.
 - **No auth, rate limiting or caching** on the API. CORS allows localhost on any port plus the origins you configure.
@@ -148,7 +176,7 @@ Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would
 | # | Item | Status |
 |---|---|---|
 | 1 | Run the CEDA download | **Done.** 18 requests, CEDA source, tomato arrivals are real. |
-| 2 | Name `market_id N` rows | **Checked.** 4 ids can't be named from any source I can reach (see §1). Id 3110 needs you. |
+| 2 | Name `market_id N` rows | **Done.** The CEDA `/markets` lookup works again; 3110 is Pune(Hadapsar) (stopped 2020). Nothing is unnamed. |
 | 3 | Retrain, stay under 5 min, compare metrics | **Done.** 42 s; every crop improved (see §2). |
 | 4 | Spot-check coordinates | **Done.** 5 checked; Pune and Vashi corrected (see §4.4). |
 | 5 | Confirm crop calendar | **Cross-checked against sources**, onion duration fixed. **Agronomist sign-off still needed.** |

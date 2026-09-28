@@ -266,6 +266,9 @@ class ForecastService:
                 thin = depth_q is not None and qty_quintal > share * depth_q
                 thin_note = ([f"{m} normally receives about {depth_q:,.0f} quintals of {crop} a day; "
                               f"{qty_quintal:g} quintals may push the price down (ranked lower)"] if thin else [])
+                if depth_q is None and src["price_source"] == "real":
+                    thin_note = [f"no reliable arrivals data for {m}, so we cannot check whether "
+                                 f"{qty_quintal:g} quintals would move its price"]
                 options.append({
                     "market": m, "district": self.cfg["markets"][m].get("district"), "distance_km": round(dist, 1),
                     "best_day": best["date"], "asking_price": best["p50"], "floor_price": best["p10"],

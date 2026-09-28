@@ -18,7 +18,7 @@ paths:
 ceda:
   base_url: https://api.ceda.ashoka.edu.in/v1
   state: Maharashtra
-  districts: [Pune]                 # add Thane / Mumbai here to fetch Vashi and Kalyan
+  districts: [Pune, Thane, Mumbai]  # exact CEDA census_district_name; new ones are fetched alone
   start_date: "2012-01-01"          # fetch window start; modelling decides what it trains on
   end_date: null                    # null = today (CEDA lags weeks to months behind)
   chunk_years: 5                    # multi-year requests are accepted; fewer requests = safer
@@ -26,18 +26,24 @@ ceda:
   min_seconds_between_requests: 1.0
   min_chunk_days: 60                # truncated chunks are split in half down to this size
   suspicious_row_counts: [999, 1000, 5000, 10000, 50000]
-  refresh_open_chunk: true          # re-fetch the chunk that ends at end_date on each run
-  # /agmarknet/markets and market_id filters hang (504) on the live API; data is fetched per
-  # district and market ids are mapped to names from the old exports (see data.py).
+  refresh_open_chunk: true          # re-fetch the chunk that ends at end_date ...
+  refresh_open_chunk_hours: 24      # ... once its cached copy is older than this
+  # market_id filters hang (504) on the live API, so data is fetched per district and filtered
+  # locally. /agmarknet/markets is only used to NAME ids (one call per district, cached,
+  # non-fatal); ids it cannot name can be mapped with a "market_id N" alias below.
   fetch_market_lists: false
+  fetch_market_names: true
   attribution: "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
   terms_url: https://ceda.ashoka.edu.in/api-terms-conditions/   # official CEDA logo is linked from this page
   logo_placement: bottom right      # CEDA terms: logo at the bottom right of any visual/app using the data
 
-# Canonical market names. `aliases` are raw spellings seen in Agmarknet / data.gov.in exports
-# (matched case-insensitively after trimming spaces). `in_raw_data: false` = no real data yet,
-# these pairs will fall back to synthetic data.
+# Canonical market names. `aliases` are raw spellings seen in Agmarknet / CEDA (matched
+# case-insensitively after trimming spaces; "market_id N" names a CEDA id the API cannot name).
+# `has_arrivals: false` on a market drops its quantity reports (arrivals stay NaN, never invented).
 markets:
+  # Not modelled (CEDA names them, too little or no recent data): Pune(Hadapsar) (id 3110, stopped
+  # 2020-05), Dound, Nira, Mulshi, Khed; Thane's Bhivandi, Vasai, Ulhasnagar, Murbad, Palghar,
+  # Shahapur; "Mumbai- Fruit Market".
   Pune:           {district: Pune, aliases: ["Pune", "Pune APMC", "Pune(Gultekdi)", "Gultekdi"]}
   Pimpri:         {district: Pune, aliases: ["Pune(Pimpri)", "Pimpri", "Pimpri Chinchwad"]}
   Manjri:         {district: Pune, aliases: ["Pune(Manjri)", "Manjri"]}
@@ -52,9 +58,17 @@ markets:
   Baramati:       {district: Pune, aliases: ["Baramati"]}
   Shirur:         {district: Pune, aliases: ["Shirur"]}
   Indapur:        {district: Pune, aliases: ["Indapur"]}
-  # Mumbai-region markets: planned, no real data yet (to be added later).
-  Vashi:          {district: Thane, in_raw_data: false, aliases: ["Vashi", "Vashi New Mumbai", "Vashi (Navi Mumbai)", "Mumbai", "Navi Mumbai"]}
-  Kalyan:         {district: Thane, in_raw_data: false, aliases: ["Kalyan"]}
+  # Mumbai region. Vashi = Mumbai APMC at Vashi, Navi Mumbai (in Thane district on the map; CEDA
+  # files it under district "Mumbai"): "Vashi New Mumbai" is its onion-potato market, "Mumbai" its
+  # vegetable market (most of the tomato). Kalyan APMC is CEDA district Thane.
+  Vashi:          {district: Thane, aliases: ["Vashi", "Vashi New Mumbai", "Vashi (Navi Mumbai)", "Mumbai", "Navi Mumbai"]}
+  Kalyan:
+    district: Thane
+    aliases: ["Kalyan"]
+    # CEDA quantities for Kalyan are placeholders (0.1-1.3 t/day, often the same value for all
+    # three crops, 2012-14 and 2024-25); keep them out rather than call Kalyan a tiny market.
+    has_arrivals: false
+    arrivals_note: "CEDA quantities are placeholder values (0.1-1.3 t/day, same for all crops)"
 
 # Canonical crop names. `has_arrivals: false` forces arrivals_tonnes to NaN (never invented).
 # plausible_modal_min/max (Rs/quintal) are only used to FLAG suspicious prices in the report

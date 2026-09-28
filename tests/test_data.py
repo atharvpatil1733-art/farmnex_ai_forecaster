@@ -95,6 +95,20 @@ def test_has_arrivals_false_forces_nan(tmp_path):
     assert df["arrivals_tonnes"].isna().all()
 
 
+def test_market_has_arrivals_false_drops_only_that_market(tmp_path):
+    cfg = copy.deepcopy(load_config())
+    cfg["markets"]["Kalyan"]["has_arrivals"] = False
+    _write(tmp_path / "p.csv", "t,cmdty,market_name,p_min,p_max,p_modal\n"
+           "2025-06-01,Onion,Kalyan,900,1100,1000\n2025-06-01,Onion,Pune,900,1100,1000")
+    _write(tmp_path / "q.csv", "t,cmdty,market_name,qty\n2025-06-01,Onion,Kalyan,0.3\n"
+           "2025-06-02,Onion,Kalyan,0.3\n2025-06-01,Onion,Pune,800")
+    df, rep = prepare(cfg, raw_dir=tmp_path)
+    kalyan = df[df["market"] == "Kalyan"]
+    assert len(kalyan) == 1 and kalyan["arrivals_tonnes"].isna().all()  # no arrivals-only row either
+    assert df.loc[df["market"] == "Pune", "arrivals_tonnes"].tolist() == [800]
+    assert any("market Kalyan" in n for n in rep.notes)
+
+
 def test_arrivals_only_days_are_kept(tmp_path):
     cfg = load_config()
     _write(tmp_path / "p.csv", "t,cmdty,market_name,p_min,p_max,p_modal\n2025-06-02,Onion,Pune,900,1100,1000")

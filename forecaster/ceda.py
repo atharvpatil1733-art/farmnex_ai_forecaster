@@ -14,9 +14,12 @@ wrong about response shapes, so trust this module, not the docs):
   * GET  /agmarknet/geographies  -> [{census_state_id, census_state_name,
                                       census_district_id, census_district_name}]
   * POST /agmarknet/markets      {commodity_id, state_id, district_id, indicator}
-                                  -> [{market_id, market_name, ...}]
-                                  HANGS (60 s gateway 504) as of 2026-09-27, so it is only
-                                  called when `ceda.fetch_market_lists: true`.
+                                  -> [{census_state_id, census_district_id, market_id,
+                                       market_name}]
+                                  Hung (60 s gateway 504) on 2026-09-27, answered in ~1 s on
+                                  2026-09-28. Used only to NAME market ids
+                                  (`ceda.fetch_market_names`, one cached call per district,
+                                  failure is non-fatal); never to filter data requests.
   * POST /agmarknet/prices       {commodity_id, state_id, district_id: [..], from_date, to_date}
                                   -> daily rows, one per market (market_id in every row).
                                   Adding `market_id: [..]` makes the request hang (504); leave
@@ -237,40 +240,118 @@ class Downloader:
             out += [dict(r, district_name=dname, census_district_id=did) for r in rows]
         return out
 
-    def chunk_path(self, indicator: str, crop: str, a: date, b: date) -> Path:
-        return self.cache / indicator / f"{crop}_{a.isoformat()}_{b.isoformat()}.json"
+    # Cache layout: one file per (indicator, crop, window, set of districts in the request):
+    #   {indicator}/{crop}_{from}_{to}__d{id-id}.json   (a file without "__d" is the older layout;
+    # its request body still says which districts it covers). Adding a district to config then
+    # fetches ONLY the new districts (together, one request per window) and keeps the rest cached.
+    def market_names(self, plan: Plan) -> None:
+        """Cache id -> name lists (ref/markets_*.json, read by data.py), one call per district.
+        Runs after the data so it never costs data requests; any failure is only logged."""
+        crop = next(iter(self.cfg["crops"]))
+        for dname, did in plan.district_ids.items():
+            path = self.cache / "ref" / f"markets_{crop}_{dname}_price.json"
+            if path.exists():
+                continue
+            body = {"commodity_id": plan.commodity_ids[crop], "state_id": plan.state_id,
+                    "district_id": did, "indicator": "price"}
+            try:
+                self._write(path, self.c.request("POST", "/agmarknet/markets", body, retry=False))
+            except CedaAuthError:
+                raise
+            except CedaError as exc:
+                self.log.append(f"market names for {dname} not fetched ({exc}); ids without a "
+                                "name show as 'market_id N' (name them via config aliases)")
+                if isinstance(exc, (BudgetExhausted, CedaRateLimitError)):
+                    return
+
+    def chunk_path(self, indicator: str, crop: str, a: date, b: date,
+                   district_ids: list[int] | tuple[int, ...] = ()) -> Path:
+        stem = f"{crop}_{a.isoformat()}_{b.isoformat()}"
+        if district_ids:
+            stem += "__d" + "-".join(str(i) for i in sorted(district_ids))
+        return self.cache / indicator / f"{stem}.json"
+
+    def _split_marker(self, indicator: str, crop: str, a: date, b: date, district_ids) -> Path:
+        # Kept out of {indicator}/*.json so data.py never reads markers as data.
+        p = self.chunk_path(indicator, crop, a, b, district_ids)
+        return p.parent / "splits" / p.name
+
+    def _chunk_files(self, indicator: str, crop: str, a: date, b: date) -> dict[Path, set[int]]:
+        """Cached files (and split markers) for exactly this window -> district ids they cover."""
+        stem = f"{crop}_{a.isoformat()}_{b.isoformat()}"
+        out = {}
+        for d in (self.cache / indicator, self.cache / indicator / "splits"):
+            for f in d.glob(f"{stem}*.json"):
+                if f.stem == stem or f.stem.startswith(stem + "__d"):
+                    body = (self._read(f) or {}).get("request") or {}
+                    out[f] = {int(i) for i in body.get("district_id") or []}
+        return out
+
+    def _age_hours(self, path: Path) -> float:
+        ts = (self._read(path) or {}).get("fetched_at")
+        if not ts:
+            return float("inf")
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds() / 3600
+
+    def missing_districts(self, indicator: str, crop: str, a: date, b: date,
+                          district_ids: list[int]) -> tuple[list[int], list[Path]]:
+        """District ids of this window still to fetch, and stale open-window files they replace."""
+        files = self._chunk_files(indicator, crop, a, b)
+        stale: list[Path] = []
+        if b >= self.today - timedelta(days=1) and self.ccfg.get("refresh_open_chunk", True):
+            max_age = float(self.ccfg.get("refresh_open_chunk_hours", 24))
+            stale = [f for f in files if self._age_hours(f) >= max_age]
+        have = set().union(*[ids for f, ids in files.items() if f not in stale])
+        return sorted(set(district_ids) - have), stale
 
     def fetch_chunk(self, plan: Plan, indicator: str, crop: str, market_ids: list[int],
-                    a: date, b: date) -> int:
-        """Fetch one window (splitting it if it looks truncated). Returns rows written."""
-        path = self.chunk_path(indicator, crop, a, b)
-        is_open = b >= self.today - timedelta(days=1)
-        if path.exists() and not (is_open and self.ccfg.get("refresh_open_chunk", True)):
-            return len(self._read(path)["records"])
+                    a: date, b: date, district_ids: list[int] | None = None) -> int:
+        """Fetch one window for the districts not cached yet (splitting it if it looks truncated
+        or times out). Returns rows written by this call."""
+        want = list(plan.district_ids.values()) if district_ids is None else district_ids
+        missing, stale = self.missing_districts(indicator, crop, a, b, want)
+        if not missing:
+            return 0
         body = {"commodity_id": plan.commodity_ids[crop], "state_id": plan.state_id,
-                "district_id": list(plan.district_ids.values()),
-                "from_date": a.isoformat(), "to_date": b.isoformat()}
+                "district_id": missing, "from_date": a.isoformat(), "to_date": b.isoformat()}
         if market_ids:  # only when market lists are fetched; the live API hangs on this filter
             body["market_id"] = market_ids
         can_split = (b - a).days + 1 > 2 * int(self.ccfg["min_chunk_days"])
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        def split(reason: str) -> int:
+            self.log.append(f"{indicator}/{crop} {a}..{b}: {reason}")
+            n = sum(self.fetch_chunk(plan, indicator, crop, market_ids, x, y, missing)
+                    for x, y in split_chunk(a, b))
+            self._write(self._split_marker(indicator, crop, a, b, missing),
+                        {"request": body, "fetched_at": now, "split_into": [[x.isoformat(), y.isoformat()] for x, y in split_chunk(a, b)]})
+            self._drop(stale, missing)
+            return n
+
         try:
             rows = self.c.request("POST", INDICATORS[indicator], body, retry=False)
         except CedaServerError as exc:
             if not can_split:
                 raise
-            self.log.append(f"{indicator}/{crop} {a}..{b}: {exc}; splitting the window")
-            return sum(self.fetch_chunk(plan, indicator, crop, market_ids, x, y) for x, y in split_chunk(a, b))
+            return split(f"{exc}; splitting the window")
         caps = set(self.ccfg.get("suspicious_row_counts", []))
         if len(rows) in caps and can_split:
-            self.log.append(f"{indicator}/{crop} {a}..{b}: {len(rows)} rows looks capped, splitting")
-            return sum(self.fetch_chunk(plan, indicator, crop, market_ids, x, y) for x, y in split_chunk(a, b))
+            return split(f"{len(rows)} rows looks capped, splitting")
         if len(rows) in caps:
             self.log.append(f"WARNING {indicator}/{crop} {a}..{b}: {len(rows)} rows may be truncated")
+        path = self.chunk_path(indicator, crop, a, b, missing)
         self._write(path, {"indicator": indicator, "crop": crop, "from_date": a.isoformat(),
-                           "to_date": b.isoformat(), "request": body,
-                           "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                           "to_date": b.isoformat(), "request": body, "fetched_at": now,
                            "records": rows})
+        self._drop([f for f in stale if f != path], missing)
         return len(rows)
+
+    def _drop(self, stale: list[Path], refetched: list[int]) -> None:
+        """Remove stale open-window files now fully covered by a fresh fetch."""
+        for f in stale:
+            body = (self._read(f) or {}).get("request") or {}
+            if f.exists() and {int(i) for i in body.get("district_id") or []} <= set(refetched):
+                f.unlink()
 
     def run(self) -> dict:
         plan = self.plan()
@@ -300,6 +381,8 @@ class Downloader:
                         raise
                     # Quantities endpoint is unverified: report it, keep the prices.
                     summary["skipped"].append(f"quantity/{crop} failed ({exc}); prices unaffected")
+        if self.ccfg.get("fetch_market_names", True) and not self.ccfg.get("fetch_market_lists"):
+            self.market_names(plan)
         summary["log"] = self.log
         self._write(self.cache / "manifest.json", summary)
         return summary
@@ -316,11 +399,28 @@ def main(argv: list[str] | None = None) -> int:
         start = date.fromisoformat(str(ccfg["start_date"]))
         end = date.fromisoformat(str(ccfg["end_date"])) if ccfg.get("end_date") else date.today()
         chunks = date_chunks(start, end, int(ccfg["chunk_years"]))
-        lists = 2 * len(cfg["crops"]) * len(ccfg["districts"]) if ccfg.get("fetch_market_lists") else 0
-        n = 2 + lists + 2 * len(cfg["crops"]) * len(chunks)
         print(f"{len(chunks)} windows: {[(a.isoformat(), b.isoformat()) for a, b in chunks]}")
-        print(f"~{n} requests on a cold cache (budget per run: {ccfg['max_requests_per_run']}, "
-              "cached files are skipped)")
+        lists = 2 * len(cfg["crops"]) * len(ccfg["districts"]) if ccfg.get("fetch_market_lists") else 0
+        if ccfg.get("fetch_market_names", True) and not lists:
+            first = next(iter(cfg["crops"]))
+            lists = sum(not (cache / "ref" / f"markets_{first}_{x}_price.json").exists()
+                        for x in ccfg["districts"])
+        d = Downloader(cfg, None, cache)
+        if (cache / "ref" / "geographies.json").exists() and (cache / "ref" / "commodities.json").exists():
+            plan = d.plan()  # reference lists are cached: no network
+            names = {v: k for k, v in plan.district_ids.items()}
+            todo = [(i, c, a, b, d.missing_districts(i, c, a, b, list(plan.district_ids.values()))[0])
+                    for i in INDICATORS for c in cfg["crops"] for a, b in plan.chunks]
+            todo = [t for t in todo if t[4]]
+            for i, c, a, b, ids in todo:
+                print(f"  fetch {i}/{c} {a}..{b} for {[names[x] for x in ids]}")
+            n = lists + len(todo)
+            print(f"districts {plan.district_ids}; ~{n} requests needed with the current cache "
+                  f"(budget per run: {ccfg['max_requests_per_run']}; splits add more)")
+        else:
+            n = 2 + lists + 2 * len(cfg["crops"]) * len(chunks)
+            print(f"~{n} requests on a cold cache (budget per run: {ccfg['max_requests_per_run']}, "
+                  "cached files are skipped)")
         return 0
     try:
         client = CedaClient(load_api_key(), ccfg["base_url"], int(ccfg["max_requests_per_run"]),

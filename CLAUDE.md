@@ -8,8 +8,8 @@ no hyperparameter tuning, full training must finish in < 5 minutes on 4 CPUs.
 
 ## Scope (all in config.yaml, never hardcode)
 - Markets: the Pune-district mandis listed under `markets:` in config.yaml (Pune, Pimpri,
-  Khed(Chakan), Manchar, Junnar, Otur, ...). Vashi and Kalyan are planned, no real data yet
-  (add their district to `ceda.districts` to fetch them).
+  Khed(Chakan), Manchar, Junnar, Otur, ...) plus Vashi and Kalyan (CEDA districts Thane and
+  Mumbai are in `ceda.districts`; add a district there to fetch its markets).
 - Crops: Onion, Tomato, Potato (add more only via config).
 
 ## Features
