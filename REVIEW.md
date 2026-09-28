@@ -122,6 +122,7 @@ Kalyan's arrivals show as synthetic because its CEDA quantity reports are placeh
    - Khadki: about 0.8 km off.
    - Manjri: about 1.6 km from the village centre (the yard is on the highway).
    - Vashi APMC: 0.4 km off, then corrected.
+   - Kalyan APMC: the yard is at Bail Bazar, Bhoiwada, Kalyan West (421301). The configured point (19.2440, 73.1300) is in Kalyan West, about 1 km from the town centre. This was checked against the address only, not pinpointed on a map.
 5. **Crop calendar**, as sowing months and days from sowing to harvest:
 
    | Crop | Sowing months | Duration |
@@ -162,7 +163,9 @@ Kalyan's arrivals show as synthetic because its CEDA quantity reports are placeh
 
 ## 5. Known limitations
 
-- **Stale data:** forecasts are for 31 Oct – 2 Nov 2025 because CEDA ends at 2025-10-30. A live feed (data.gov.in) is the next step.
+- **Stale data:** forecasts are for 31 Oct – 2 Nov 2025 because CEDA ends at 2025-10-30.
+  - On 2026-09-28 every district, crop and indicator was requested up to that day, and the newest row was still 2025-10-30. So retraining gains nothing until CEDA publishes newer data; rerun `python -m forecaster.ceda && python -m forecaster.data && python -m forecaster.train` when it does. The open window refreshes itself once its copy is a day old.
+  - data.gov.in, the live feed CLAUDE.md names as the next step, could not be reached from this build environment: the network policy blocks `api.data.gov.in`.
 - **Pune(Hadapsar)** (id 3110, about 4,600 rows, 2012–2020) is named but not modelled, because it stopped reporting.
 - **9 pairs have no real prices:** tomato and potato at the small outer Pune markets. By default they are hidden from every answer. With `api.show_synthetic: true` they appear, labelled `synthetic`, and their numbers are illustrative only.
 - **Kalyan has no reliable arrivals,** so its demand signal leans on synthetic arrivals, and its market size can't be checked for a sale.
