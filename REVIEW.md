@@ -2,12 +2,39 @@
 
 Everything runs end to end:
 - `python -m forecaster.ceda` downloads the data: 18 API requests for Pune, then 18 more for Thane and Mumbai.
-- `python -m forecaster.data` cleans it.
-- `python -m forecaster.train` takes 48 s on 4 CPUs.
+- `python -m forecaster.data` cleans it, adding the uploaded agmarknet.gov.in exports for the dates after CEDA ends.
+- `python -m forecaster.train` takes 52 s on 4 CPUs.
 - `uvicorn app.main:app` serves all 6 endpoints, and each one returned 200 on a live run (`reports/sample_responses.md`).
-- `python -m pytest -q` passes 56 tests.
+- `python -m pytest -q` passes 58 tests.
 
-**The data is full CEDA API history: 2012-01-01 to 2025-10-30, districts Pune, Thane and Mumbai, 72,439 rows. Vashi and Kalyan now have real prices.**
+**The data runs from 2012-01-01 to 2026-09-28 (79,421 rows), for districts Pune, Thane and Mumbai.** CEDA API history covers up to 2025-10-30, then agmarknet.gov.in exports take over. **Forecasts now start from 2026-09-28.**
+
+## 0. Nov 2025 – Sep 2026 exports (added 2026-09-28)
+
+- **Files:** 9 agmarknet.gov.in "Daily Price Arrival Report" CSVs (Pune / Mumbai / Thane × Onion / Potato / Tomato) in `data/raw/`, covering 2025-11-07 → 2026-09-28.
+  - 5,328 rows, prices in ₹/quintal, arrivals in metric tonnes.
+  - No 1,000-row cap, no missing or zero prices, no duplicates, and every date parses.
+- **Checked against CEDA before use:**
+  - The markets are the same, and they report as often as before (Pune 5.2–5.4 days a week in both).
+  - Arrival levels match: Vashi onion 1,069 vs 1,072 t a day, Pune onion 1,117 vs 1,034 t.
+  - Onion and potato prices carry on smoothly from CEDA's Aug–Oct 2025 into the exports' Nov–Dec 2025. Tomato is higher in every market at once, which looks seasonal.
+- **Combined source:** `data_prep.source: ceda+exports` takes CEDA up to its last date (2025-10-30) and the exports **only for later dates**.
+  - No day is taken from both, so nothing is counted twice.
+  - The old 2024/2025 exports end by 2025-10-30 and are skipped automatically.
+  - CLAUDE.md's "never mix" rule was updated to say this.
+- **Code changes in `forecaster/data.py`:**
+  - It reads this report format: thousands separators ("2,900.00"), a price and an arrival on the same row, and a per-row "Arrival Unit".
+  - Tests cover the format and the no-overlap rule.
+- **Market names:**
+  - "Mumbai-Onion & Potato Market" and "APMC Mumbai" map to Vashi; "APMC Pune / Junnar / Manchar / Indapur / Kalyan" already matched.
+  - "APMC Khed" (June–Sep 2026 only) is CEDA's separate "Khed" market, not Khed(Chakan), so it is not modelled.
+- **Caveats:**
+  - **The only hole is 31 Oct – 6 Nov 2025**, 7 days between the two sources.
+  - **Onion has roughly tripled:** it is at ₹3,000–4,600/quintal in Sep 2026, against about ₹1,000–1,500 a year earlier, in every market.
+  - **Kalyan:** arrivals are still placeholders (0.3 t, ignored), and Kalyan tomato in Sep 2026 (about ₹400) is far below other markets (₹1,000–1,900).
+  - **Some small markets have gaps over 14 days,** for example Indapur onion 58 days and Otur potato 49 days.
+  - **Baramati and Shirur are not in the exports,** so their onion stays stale and ranks last.
+  - **Exports don't update themselves:** upload a newer export to move forecasts forward, until a live feed exists.
 
 ## 1. CEDA outcome
 
@@ -54,20 +81,23 @@ Everything runs end to end:
 
 ## 2. Metrics
 
-These are leak-free and scored on real pairs only. The test period is 2025-09-01 to 2025-10-30. The baseline is the seasonal naive (same weekday last week). MAE is in ₹/quintal for price and tonnes for arrivals.
+These are leak-free and scored on real pairs only. The test period is the last 60 days, 2026-07-31 to 2026-09-28. The baseline is the seasonal naive (same weekday last week). MAE is in ₹/quintal for price and tonnes for arrivals.
 
 | Target | Crop | n | MAE model | MAE baseline | MAPE model | MAPE baseline | p10–p90 coverage |
 |---|---|---|---|---|---|---|---|
-| price | Onion | 1326 | 108.0 | 131.8 | 9.8% | 11.9% | 81.5% |
-| price | Potato | 996 | 121.0 | 148.8 | 8.3% | 10.2% | 78.2% |
-| price | Tomato | 1254 | 267.9 | 360.1 | 22.7% | 30.4% | 77.6% |
-| arrivals | Onion | 1239 | 96.8 | 130.0 | 37.1% | 52.4% | 75.6% |
-| arrivals | Potato | 996 | 58.4 | 85.7 | 61.9% | 82.2% | 74.4% |
-| arrivals | Tomato | 1155 | 17.9 | 27.8 | 33.0% | 36.2% | 79.1% |
+| price | Onion | 1584 | 262.1 | 361.3 | 9.0% | 12.4% | 81.2% |
+| price | Potato | 1083 | 73.6 | 89.5 | 7.2% | 8.6% | 80.5% |
+| price | Tomato | 1278 | 182.9 | 241.0 | 14.7% | 18.9% | 81.1% |
+| arrivals | Onion | 1470 | 70.1 | 93.0 | 34.7% | 43.9% | 81.6% |
+| arrivals | Potato | 996 | 54.4 | 68.3 | 44.7% | 43.5% | 78.2% |
+| arrivals | Tomato | 1188 | 29.8 | 40.6 | 38.6% | 34.0% | 81.7% |
 
-- **Every crop beats the baseline on MAE and MAPE, at every horizon.** No crop is flagged. Per-horizon rows are in `reports/metrics.md`.
-- **The p10–p90 intervals cover about 75–82% of actual values**, close to the 80% they should. On the old export data they covered only about 65%.
-- **The test set now also includes Vashi and Kalyan**, so these numbers are not directly comparable with the Pune-only run:
+- **Price beats the baseline for every crop, on MAE and MAPE, at every horizon.**
+  - Onion MAE in ₹ is higher than before only because onion prices tripled; its MAPE improved from 9.8% to 9.0%.
+  - Tomato MAPE fell from 22.7% to 14.7%.
+- **Arrivals beat the baseline on MAE for every crop, but not on MAPE for potato and tomato**, which is flagged in `reports/metrics.md` as CLAUDE.md requires. MAPE is inflated by very small markets (Pimpri or Manchar tomato at 0.3–1 t a day), where a small miss is a large percentage. Arrivals only feed the demand signal and the market-size check, not the price forecast.
+- **The p10–p90 intervals cover 78–82% of actual values**, close to the 80% they should.
+- **Earlier runs, for reference:** the test set then was Sep–Oct 2025, so the numbers aren't directly comparable. The table below compares the Pune-only run with the run that added Vashi and Kalyan:
 
   | Crop | Price MAE (Pune only) | Price MAE (with Vashi, Kalyan) | Price MAPE (Pune only) | Price MAPE (with Vashi, Kalyan) |
   |---|---|---|---|---|
@@ -88,7 +118,7 @@ These are leak-free and scored on real pairs only. The test period is 2025-09-01
 
 ## 3. Real vs synthetic per market x crop
 
-Each cell is price source / arrivals source, with the number of real price days in brackets. A pair needs at least 30 real days to count as "real". 39 of 48 pairs have real prices and 36 have real arrivals.
+Each cell is price source / arrivals source, with the number of real price days up to 2025-10-30 in brackets (the 2026 exports add about 50–320 days to each pair they cover). A pair needs at least 30 real days to count as "real". 39 of 48 pairs have real prices and 36 have real arrivals.
 
 | Market | Onion | Tomato | Potato |
 |---|---|---|---|
@@ -163,8 +193,8 @@ Kalyan's arrivals show as synthetic because its CEDA quantity reports are placeh
 
 ## 5. Known limitations
 
-- **Stale data:** forecasts are for 31 Oct – 2 Nov 2025 because CEDA ends at 2025-10-30.
-  - On 2026-09-28 every district, crop and indicator was requested up to that day, and the newest row was still 2025-10-30. So retraining gains nothing until CEDA publishes newer data; rerun `python -m forecaster.ceda && python -m forecaster.data && python -m forecaster.train` when it does. The open window refreshes itself once its copy is a day old.
+- **Freshness depends on uploads:** forecasts start at 2026-09-28 thanks to the uploaded exports, but CEDA itself still ends at 2025-10-30.
+  - To stay current, drop a newer agmarknet.gov.in export in `data/raw/`, then run `python -m forecaster.data && python -m forecaster.train`. Only dates after CEDA's last date are used, and exact duplicate rows across overlapping export files are dropped.
   - data.gov.in, the live feed CLAUDE.md names as the next step, could not be reached from this build environment: the network policy blocks `api.data.gov.in`.
 - **Pune(Hadapsar)** (id 3110, about 4,600 rows, 2012–2020) is named but not modelled, because it stopped reporting.
 - **9 pairs have no real prices:** tomato and potato at the small outer Pune markets. By default they are hidden from every answer. With `api.show_synthetic: true` they appear, labelled `synthetic`, and their numbers are illustrative only.

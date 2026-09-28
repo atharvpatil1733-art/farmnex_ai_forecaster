@@ -8,7 +8,7 @@ paths:
   artifacts_dir: artifacts
   reports_dir: reports
   ceda_cache_dir: data/raw/ceda     # raw API responses (JSON), git-ignored, rebuilt by forecaster.ceda
-  exports_dir: data/raw             # manual website exports (*.csv/xls/xlsx), fallback only
+  exports_dir: data/raw             # website exports (*.csv/xls/xlsx): dates after CEDA ends (see data_prep.source)
 
 # CEDA (Ashoka University) Agmarknet API: the PRIMARY real-data source.
 # `python -m forecaster.ceda` downloads into ceda_cache_dir; `python -m forecaster.data` cleans it.
@@ -43,7 +43,8 @@ ceda:
 markets:
   # Not modelled (CEDA names them, too little or no recent data): Pune(Hadapsar) (id 3110, stopped
   # 2020-05), Dound, Nira, Mulshi, Khed; Thane's Bhivandi, Vasai, Ulhasnagar, Murbad, Palghar,
-  # Shahapur; "Mumbai- Fruit Market".
+  # Shahapur; "Mumbai- Fruit Market"; "APMC Khed" (CEDA "Khed", not Khed(Chakan); in the
+  # 2026 exports from 2026-06-29 only).
   Pune:           {district: Pune, aliases: ["Pune", "Pune APMC", "Pune(Gultekdi)", "Gultekdi"]}
   Pimpri:         {district: Pune, aliases: ["Pune(Pimpri)", "Pimpri", "Pimpri Chinchwad"]}
   Manjri:         {district: Pune, aliases: ["Pune(Manjri)", "Manjri"]}
@@ -61,7 +62,8 @@ markets:
   # Mumbai region. Vashi = Mumbai APMC at Vashi, Navi Mumbai (in Thane district on the map; CEDA
   # files it under district "Mumbai"): "Vashi New Mumbai" is its onion-potato market, "Mumbai" its
   # vegetable market (most of the tomato). Kalyan APMC is CEDA district Thane.
-  Vashi:          {district: Thane, aliases: ["Vashi", "Vashi New Mumbai", "Vashi (Navi Mumbai)", "Mumbai", "Navi Mumbai"]}
+  Vashi:          {district: Thane, aliases: ["Vashi", "Vashi New Mumbai", "Vashi (Navi Mumbai)", "Mumbai", "Navi Mumbai",
+                                   "Mumbai-Onion & Potato Market", "APMC Mumbai"]}
   Kalyan:
     district: Thane
     aliases: ["Kalyan"]
@@ -96,10 +98,13 @@ crops:
     plausible_modal_max: 6000
 
 data_prep:
-  # Which raw data to clean: "ceda" = API cache only, "exports" = manual website exports only,
-  # "auto" = API cache if it has any files, else the exports. Never both (same underlying
-  # Agmarknet data; mixing them double-counts).
-  source: auto
+  # Which raw data to clean:
+  #   "ceda+exports" = CEDA API cache, then website exports ONLY for dates after the last CEDA
+  #                    date (CEDA lags ~11 months; agmarknet.gov.in "Daily Price Arrival Report"
+  #                    exports fill the gap). No day is taken from both, so nothing double-counts.
+  #   "ceda" = API cache only, "exports" = website exports only,
+  #   "auto" = API cache if it has any files, else the exports.
+  source: ceda+exports
   # Keep market-days that have arrivals but no price (modal_price = NaN). The arrivals model
   # needs them; the price model trains only on rows where modal_price was reported.
   keep_arrivals_only_rows: true

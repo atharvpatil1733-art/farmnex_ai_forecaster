@@ -12,8 +12,14 @@
   placeholders (0.1-1.3 t/day), so Kalyan has real prices but no arrivals (`has_arrivals: false`).
 - `*_price_data.csv`, `*_quantity_data.csv`: the first manual CEDA website exports (Onion,
   Potato price + quantity; Tomato price only). Nine of them hit the ~1000-row export cap and
-  keep only Mar/Jun-Oct 2024 and Apr/May-Oct 2025. Used only as a fallback when the API cache
-  is empty (`data_prep.source: auto`).
+  keep only Mar/Jun-Oct 2024 and Apr/May-Oct 2025. All end by 2025-10-30, so with
+  `data_prep.source: ceda+exports` they are skipped (CEDA has those days).
+- `<District> <Crop> Daily Price Arrival Report-07-11-2025 to 28-09-2026 for Maharashtra.csv`
+  (9 files: Pune / Mumbai / Thane x Onion / Potato / Tomato): agmarknet.gov.in exports with price
+  AND arrivals (metric tonnes) per row, 2025-11-07 .. 2026-09-28. They fill the gap after CEDA's
+  last date (2025-10-30). **Rule (`data_prep.source: ceda+exports`): CEDA wins; exports are used
+  only for dates after the last CEDA date**, so no day is counted twice. To refresh, add a newer
+  export here and rerun `python -m forecaster.data && python -m forecaster.train`.
 - `mandi.csv`: cleaned output, **generated**; do not edit by hand. Rebuild with
   `python -m forecaster.data` (also rewrites `reports/data_quality.md`, which says which
   source was used). Schema: date, district, market, commodity, min_price, max_price,

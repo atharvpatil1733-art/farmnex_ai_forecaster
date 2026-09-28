@@ -39,8 +39,9 @@ Pipeline: `python -m forecaster.ceda` (download) -> `python -m forecaster.data` 
     never hardcode ids. Its module docstring is the source of truth for endpoints/shapes.
   - CEDA data lags weeks to months. Forecasts are anchored at the last real date (`as_of`),
     not "today". A live daily feed (data.gov.in) is a later step, not today.
-  - The old website exports in data/raw/*.csv are a fallback only (`data_prep.source`).
-    Never mix both sources.
+  - Website exports in data/raw/*.csv: CEDA wins. With `data_prep.source: ceda+exports`
+    (default) exports are used ONLY for dates after the last CEDA date (agmarknet.gov.in
+    "Daily Price Arrival Report" files fill CEDA's lag), so no day comes from both sources.
 - data/raw/mandi.csv (generated, committed). Schema:
   date, district, market, commodity, min_price, max_price, modal_price, arrivals_tonnes
   data.py normalizes market/crop names via config aliases (skill: agmarknet-data-prep).
