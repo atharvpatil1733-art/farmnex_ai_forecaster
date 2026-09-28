@@ -54,6 +54,17 @@ set `api.show_synthetic: true` in `config.yaml` to show them for demos.
 data lags. See `REVIEW.md` for assumptions and limitations, `reports/` for metrics, data
 quality and sample responses.
 
+## Connecting it to FarmNex (Flutter + FastAPI backend + Supabase)
+
+Step-by-step beginner guide: [`integration/INTEGRATION.md`](integration/INTEGRATION.md). It
+includes a ready backend router, a Supabase table and Flutter code. Hosting needs no Docker:
+Render.com, build `pip install -r requirements.txt`, start
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+
+Set `FARMNEX_FORECASTER_API_KEY` on the forecaster so only your backend can call it: every
+endpoint except `/health` then needs the `X-API-Key` header. With it unset, the API is open,
+which is fine for local development.
+
 ## Tests
 
 ```bash
