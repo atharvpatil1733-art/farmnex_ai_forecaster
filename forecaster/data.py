@@ -41,6 +41,7 @@ _COLUMN_PATTERNS = [
     (r"^(pmin|minprice|minimumprice).*", "min_price"),
     (r"^(pmax|maxprice|maximumprice).*", "max_price"),
     (r"^(pmodal|modalprice).*", "modal_price"),
+    (r"^(arrivalunit|qtyunit|unit)$", "arrival_unit"),  # agmarknet.gov.in reports: "Metric Tonnes"
     (r"^(qty|quantity|arrival|arrivals).*", "arrivals"),
 ]
 
@@ -82,6 +83,22 @@ def rename_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
     return df.rename(columns=mapping)[list(mapping.values())], unit
 
 
+def _num(values: pd.Series) -> pd.Series:
+    """Numbers as exported: "2,900.00" (thousands separators) or plain."""
+    return pd.to_numeric(values.astype(str).str.replace(",", "", regex=False).str.strip(),
+                         errors="coerce")
+
+
+def _unit_divisor(units: pd.Series | None, header_unit: str | None, default: str) -> pd.Series | float:
+    """Divide arrivals by this to get tonnes: per-row "Arrival Unit" values win, then the header."""
+    fallback = 10.0 if (header_unit or default) == "quintals" else 1.0
+    if units is None:
+        return fallback
+    u = units.astype(str).str.lower()
+    return pd.Series(np.where(u.str.contains("quintal"), 10.0,
+                              np.where(u.str.contains("tonne"), 1.0, fallback)), index=units.index)
+
+
 def _peek_rows(path: Path, n: int = 30) -> list[list[str]]:
     if path.suffix.lower() == ".csv":
         with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
@@ -119,6 +136,10 @@ class PrepReport:
     rows_in_price: int = 0
     rows_in_qty: int = 0
     source: str = "exports"
+    exports_after: object = None          # ceda+exports: exports used only after this date
+    exports_rows_used: int = 0
+    exports_rows_skipped: int = 0
+    exports_files_used: list = field(default_factory=list)
     orphan_arrivals: pd.DataFrame | None = None
 
 
@@ -158,16 +179,40 @@ def _parse_dates(df: pd.DataFrame, rep: PrepReport) -> pd.DataFrame:
 
 def load_raw(cfg: dict, raw_dir: Path, rep: PrepReport,
              ceda_dir: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Pick ONE raw source per config `data_prep.source` and return (price rows, quantity rows)."""
+    """Pick the raw source per config `data_prep.source` and return (price rows, quantity rows).
+
+    "ceda+exports": the CEDA cache, then website exports ONLY for dates after the last CEDA
+    price date. Both are the same Agmarknet data, so days are never taken from both.
+    """
     source = cfg["data_prep"].get("source", "auto")
     has_ceda = ceda_dir is not None and any(Path(ceda_dir).glob("price/*.json"))
-    if source == "ceda" or (source == "auto" and has_ceda):
-        if not has_ceda:
-            raise FileNotFoundError(f"no CEDA price files in {ceda_dir}; run python -m forecaster.ceda")
+    if source == "ceda" and not has_ceda:
+        raise FileNotFoundError(f"no CEDA price files in {ceda_dir}; run python -m forecaster.ceda")
+    if source in ("ceda", "auto", "ceda+exports") and has_ceda:
         rep.source = "ceda"
-        return load_ceda(cfg, Path(ceda_dir), rep)
+        p, q = load_ceda(cfg, Path(ceda_dir), rep)
+        if source != "ceda+exports":
+            return p, q
+        cutoff = parse_dates(p["date"]).max()
+        ep, eq = load_exports(cfg, raw_dir, rep)
+        newer_p = parse_dates(ep["date"]) > cutoff
+        newer_q = parse_dates(eq["date"]) > cutoff
+        rep.source, rep.exports_after = "ceda+exports", cutoff.date()
+        rep.exports_rows_used = int(newer_p.sum() + newer_q.sum())
+        rep.exports_rows_skipped = int((~newer_p).sum() + (~newer_q).sum())
+        used = sorted(set(ep.loc[newer_p, "file"]) | set(eq.loc[newer_q, "file"]))
+        rep.exports_files_used = used
+        rep.notes.append(f"Website exports used only for dates after {cutoff.date()} (last CEDA "
+                         f"date): {rep.exports_rows_used} rows from {', '.join(f'`{f}`' for f in used) or 'no file'}; "
+                         f"{rep.exports_rows_skipped} export rows on or before it skipped (CEDA has them).")
+        return (pd.concat([p, ep[newer_p].drop(columns="file")], ignore_index=True),
+                pd.concat([q, eq[newer_q].drop(columns="file")], ignore_index=True))
+    if source == "ceda+exports":
+        rep.notes.append("**No CEDA cache found: using website exports only.** Run "
+                         "`python -m forecaster.ceda` first for full history.")
     rep.source = "exports"
-    return load_exports(cfg, raw_dir, rep)
+    p, q = load_exports(cfg, raw_dir, rep)
+    return p.drop(columns="file"), q.drop(columns="file")
 
 
 _QTY_KEYS = ("quantity", "qty", "arrivals", "arrival_quantity", "arrival", "value")
@@ -268,21 +313,29 @@ def load_exports(cfg: dict, raw_dir: Path, rep: PrepReport) -> tuple[pd.DataFram
             continue
         raw = read_raw_file(path)
         df, unit = rename_columns(raw)
+        df["file"] = path.name
         info = {"file": path.name, "rows": len(raw), "kind": "?", "truncated": len(raw) in caps}
+        units = df.pop("arrival_unit") if "arrival_unit" in df else None
+        kinds = []
         if "modal_price" in df:
-            info["kind"] = "price"
+            kinds.append("price")
+            pr = df.drop(columns="arrivals", errors="ignore").copy()
             for c in ("min_price", "max_price", "modal_price"):
-                df[c] = pd.to_numeric(df.get(c), errors="coerce")
-            if "variety" not in df:
-                df["variety"] = "NA"
-            prices.append(df)
-        elif "arrivals" in df:
-            info["kind"] = "quantity"
-            unit = unit or default_unit
-            info["unit"] = unit
-            q = pd.to_numeric(df["arrivals"], errors="coerce")
-            df["arrivals_tonnes"] = q / 10.0 if unit == "quintals" else q
-            qtys.append(df.drop(columns="arrivals"))
+                pr[c] = _num(pr[c]) if c in pr else np.nan
+            if "variety" not in pr:
+                pr["variety"] = "NA"
+            prices.append(pr)
+        if "arrivals" in df:
+            # Quantity files, and agmarknet.gov.in reports that carry price AND arrivals per row.
+            kinds.append("quantity")
+            div = _unit_divisor(units, unit, default_unit)
+            info["unit"] = ("per-row Arrival Unit" if units is not None
+                            else unit or default_unit)
+            qt = df[[c for c in ("date", "market", "commodity", "file") if c in df]].copy()
+            qt["arrivals_tonnes"] = _num(df["arrivals"]) / div
+            qtys.append(qt)
+        if kinds:
+            info["kind"] = "+".join(kinds)
         else:
             rep.notes.append(f"`{path.name}`: no price or quantity column recognised, skipped.")
         dates = parse_dates(df["date"]) if "date" in df else pd.Series(dtype="datetime64[ns]")
@@ -295,8 +348,8 @@ def load_exports(cfg: dict, raw_dir: Path, rep: PrepReport) -> tuple[pd.DataFram
                     f"{sorted(dates.dt.year.dropna().unique().astype(int).tolist())}.")
         rep.files.append(info)
     empty_p = pd.DataFrame(columns=["date", "market", "commodity", "variety",
-                                    "min_price", "max_price", "modal_price"])
-    empty_q = pd.DataFrame(columns=["date", "market", "commodity", "arrivals_tonnes"])
+                                    "min_price", "max_price", "modal_price", "file"])
+    empty_q = pd.DataFrame(columns=["date", "market", "commodity", "arrivals_tonnes", "file"])
     return (pd.concat(prices, ignore_index=True) if prices else empty_p,
             pd.concat(qtys, ignore_index=True) if qtys else empty_q)
 
@@ -498,9 +551,11 @@ def write_report(df: pd.DataFrame, rep: PrepReport, cfg: dict, path: Path) -> No
            "Generated by `python -m forecaster.data` (agmarknet-data-prep). "
            "Prices are Rs/quintal, arrivals in tonnes.", ""]
 
-    src = ("CEDA Agmarknet API cache (`python -m forecaster.ceda`)" if rep.source == "ceda"
-           else "manual website exports in data/raw/ (fallback; run `python -m forecaster.ceda` "
-                "for full history)")
+    src = {"ceda": "CEDA Agmarknet API cache (`python -m forecaster.ceda`)",
+           "ceda+exports": f"CEDA Agmarknet API cache up to {rep.exports_after}, then website "
+                           f"exports in data/raw/ for later dates only ({rep.exports_rows_used} rows)"
+           }.get(rep.source, "manual website exports in data/raw/ (fallback; run "
+                             "`python -m forecaster.ceda` for full history)")
     has_price = df["modal_price"].notna()
     out += ["## Summary", "",
             f"- Source: **{src}**",
@@ -525,6 +580,11 @@ def write_report(df: pd.DataFrame, rep: PrepReport, cfg: dict, path: Path) -> No
     out.append("")
 
     trunc = files[files["truncated"]] if not files.empty else files
+    if rep.source == "ceda+exports" and not trunc.empty:
+        # Capped exports only matter if they supplied rows; the old capped exports end before
+        # the CEDA cutoff and are skipped, so only CEDA windows are checked here.
+        used = set(rep.exports_files_used)
+        trunc = trunc[trunc["file"].str.startswith("ceda/") | trunc["file"].isin(used)]
     out += ["## Important findings", ""]
     if not trunc.empty and rep.source == "exports":
         out.append(f"- **Truncated exports:** {len(trunc)} of {len(files)} files have exactly "

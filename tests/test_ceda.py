@@ -78,6 +78,7 @@ def make_cfg(start="2024-01-01", end="2024-01-10", years=1, budget=100, fetch_li
     cfg["ceda"].update(districts=["Pune"], start_date=start, end_date=end, chunk_years=years,
                        max_requests_per_run=budget, min_chunk_days=2,
                        fetch_market_lists=fetch_lists, fetch_market_names=False)
+    cfg["data_prep"]["source"] = "ceda"  # never pick up the real website exports in data/raw
     return cfg
 
 
