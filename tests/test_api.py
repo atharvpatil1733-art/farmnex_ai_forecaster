@@ -192,3 +192,15 @@ def test_sell_options_demotes_thin_markets(client):
         assert any("normally receives" in r for r in o["reason"])
     if j["best"] and any(not o["thin_market"] and o["data_source"] == "real" for o in opts):
         assert not j["best"]["thin_market"]
+
+
+def test_api_key_protects_everything_but_health(client, monkeypatch):
+    monkeypatch.setenv("FARMNEX_FORECASTER_API_KEY", "s3cret")
+    assert client.get("/health").status_code == 200
+    assert client.get("/meta").status_code == 401
+    assert client.get("/meta", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert client.get("/meta", headers={"X-API-Key": "s3cret"}).status_code == 200
+    r = client.post("/forecast/sell-options", json={"lat": 18.5, "lon": 73.9, "crop": "Onion", "qty_quintal": 5})
+    assert r.status_code == 401
+    monkeypatch.delenv("FARMNEX_FORECASTER_API_KEY")
+    assert client.get("/meta").status_code == 200  # no key configured: open (local dev)

@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -47,9 +47,21 @@ app.add_middleware(CORSMiddleware, allow_origins=cors_origins(CFG),
                    allow_methods=["GET", "POST"], allow_headers=["*"])
 
 
+
 @app.exception_handler(NotFound)
 async def not_found(_: Request, exc: NotFound):
     return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """If FARMNEX_FORECASTER_API_KEY is set, every /meta and /forecast/* call must send it in the
+    X-API-Key header (your FarmNex backend does; farmers' phones never see it). /health stays open."""
+    expected = os.environ.get("FARMNEX_FORECASTER_API_KEY")
+    if expected and x_api_key != expected:
+        raise HTTPException(status_code=401, detail="missing or wrong X-API-Key")
+
+
+PROTECTED = [Depends(require_api_key)]
 
 
 def svc(request: Request) -> ForecastService:
@@ -61,28 +73,28 @@ def health(request: Request):
     return svc(request).health()
 
 
-@app.get("/meta", response_model=Meta)
+@app.get("/meta", response_model=Meta, dependencies=PROTECTED)
 def meta(request: Request):
     return svc(request).meta_info()
 
 
-@app.get("/forecast/price", response_model=PriceForecast)
+@app.get("/forecast/price", response_model=PriceForecast, dependencies=PROTECTED)
 def forecast_price(request: Request, market: str, crop: str, days: int = Query(MAX_H, ge=1, le=MAX_H)):
     return svc(request).price(market, crop, days)
 
 
-@app.get("/forecast/demand", response_model=DemandResponse,
+@app.get("/forecast/demand", response_model=DemandResponse, dependencies=PROTECTED,
          description=f"HIGH/NORMAL/LOW per crop for a district. {DEMAND_NOTE}")
 def forecast_demand(request: Request, district: str, date: date | None = None):
     return svc(request).demand(district, date)
 
 
-@app.post("/forecast/sell-options", response_model=SellResponse)
+@app.post("/forecast/sell-options", response_model=SellResponse, dependencies=PROTECTED)
 def sell_options(request: Request, body: SellRequest):
     return svc(request).sell_options(body.lat, body.lon, body.crop, body.qty_quintal, body.radius_km)
 
 
-@app.get("/forecast/crops", response_model=CropsResponse)
+@app.get("/forecast/crops", response_model=CropsResponse, dependencies=PROTECTED)
 def forecast_crops(request: Request, district: str, sowing_month: int = Query(ge=1, le=12),
                    k: int = Query(5, ge=1, le=20)):
     return svc(request).best_crops(district, sowing_month, k)
