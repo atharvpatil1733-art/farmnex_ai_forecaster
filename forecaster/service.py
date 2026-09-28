@@ -192,7 +192,8 @@ class ForecastService:
                 "as_of": max((s["last_real_price_date"] for s in real), default=self.as_of.date()),
                 "pairs": srcs,
                 "reason": [why,
-                           f"median over {len(pch)} {district} markets, p50 forecast for {target.date()} vs 7-day average",
+                           f"typical change across {len(pch)} {district} markets: expected price on {target.date()} "
+                           f"vs the last 7 days' average",
                            f"{len(real)} of {len(srcs)} markets have real {crop} prices"
                            + ("" if all(s["arrivals_source"] == "real" for s in srcs) else "; arrivals partly synthetic")],
             })
@@ -227,8 +228,9 @@ class ForecastService:
                     "net_total": round(net * qty_quintal, 0),
                     "likely_closed_days": [d["date"] for d in f["days"] if d["likely_closed"]],
                     "data_source": src["price_source"], "as_of": self.pair_as_of(m, crop),
-                    "reason": ([f"best open day {best['date']} (p50 {best['p50']:,.0f} Rs/q) minus transport "
-                                f"{dist:,.0f} km x {rate} Rs/km/q = {cost:,.0f} Rs/q"]
+                    "reason": ([f"best open day {best['date']}: expected price {best['p50']:,.0f} Rs/quintal, "
+                                f"minus transport for {dist:,.0f} km at {rate:g} Rs/km per quintal "
+                                f"= {cost:,.0f} Rs/quintal"]
                                + self._staleness_note(m, crop) + f["reason"])[:4],
                 })
         # Trust tier first: fresh real data, then stale real data, then synthetic; then net price.

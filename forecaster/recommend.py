@@ -20,10 +20,11 @@ def demand_signal(price_change_pct: float, arrivals_change_pct: float, threshold
     higher prices). LOW: price expected down while arrivals are not falling. Else NORMAL."""
     p, a = price_change_pct, arrivals_change_pct
     if p > threshold and a < p:
-        return "HIGH", f"price expected {p:+.1f}% while arrivals {a:+.1f}%: demand outpacing supply"
+        return "HIGH", f"price expected to change {p:+.1f}% while arrivals change {a:+.1f}%: buyers want more than is arriving"
     if p < -threshold and a > p:
-        return "LOW", f"price expected {p:+.1f}% while arrivals {a:+.1f}%: supply outpacing demand"
-    return "NORMAL", f"price {p:+.1f}% and arrivals {a:+.1f}%: no clear imbalance (threshold {threshold}%)"
+        return "LOW", f"price expected to change {p:+.1f}% while arrivals change {a:+.1f}%: more is arriving than buyers want"
+    return "NORMAL", (f"price expected to change {p:+.1f}% and arrivals {a:+.1f}%: "
+                      f"no clear shortage or glut (moves under {threshold:g}% count as flat)")
 
 
 def best_sell_day(days: list[dict]) -> dict | None:

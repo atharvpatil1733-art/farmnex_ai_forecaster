@@ -9,22 +9,25 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 
 
 def _describe(name: str, value, row: pd.Series, target: str) -> str:
-    unit = "Rs/q" if target == "price" else "t"
+    unit = "Rs/quintal" if target == "price" else "tonnes"
     what = "price" if target == "price" else "arrivals"
     v = None if value is None or (isinstance(value, float) and np.isnan(value)) else value
-    num = (lambda x: f"{np.expm1(x):,.0f} {unit}") if v is not None else (lambda x: "no report")
     if name.startswith("y_lag_"):
         k = int(name.rsplit("_", 1)[1])
-        when = "latest" if k == 1 else f"{what} {k - 1} days earlier"
-        return f"{'latest ' + what if k == 1 else when} ({num(v)})"
+        when = {1: f"latest {what}", 2: f"yesterday's {what}"}.get(k, f"{what} {k - 1} days earlier")
+        return f"{when} ({np.expm1(v):,.0f} {unit})" if v is not None else f"no {what} reported for that day"
     if name.startswith("y_roll_mean_"):
-        return f"{name.rsplit('_', 1)[1]}-day average {what} ({num(v)})"
+        w = name.rsplit("_", 1)[1]
+        return (f"average {what} over the last {w} days ({np.expm1(v):,.0f} {unit})" if v is not None
+                else f"too few {what} reports in the last {w} days")
     if name.startswith("y_roll_std_"):
-        return f"{name.rsplit('_', 1)[1]}-day {what} volatility"
+        w = name.rsplit("_", 1)[1]
+        return (f"how much the {what} moved in the last {w} days" if v is not None
+                else f"too few {what} reports in the last {w} days")
     if name.startswith("arr_"):
-        return f"recent real arrivals ({np.expm1(v):,.0f} t)" if v is not None else "missing arrivals data"
+        return f"recent arrivals at the market ({np.expm1(v):,.0f} tonnes)" if v is not None else "no recent arrivals data"
     if name.startswith("price_"):
-        return f"recent price ({np.expm1(v):,.0f} Rs/q)" if v is not None else "missing price data"
+        return f"recent price ({np.expm1(v):,.0f} Rs/quintal)" if v is not None else "no recent price reported"
     if name == "dow":
         return f"day of week ({WEEKDAYS[int(v)]})"
     if name == "month":
@@ -75,15 +78,15 @@ def sarimax_reasons(rec: dict, harvest_month: str, in_window: bool, crop: str) -
     diff = (price / mean - 1) * 100 if mean else 0.0
     m = MONTHS[int(harvest_month[5:7]) - 1]
     if rec["method"] == "sarimax":
-        reasons.append(f"SARIMAX on {rec['history_months']} months of prices expects {price:,.0f} Rs/q in "
+        reasons.append(f"SARIMAX on {rec['history_months']} months of prices expects {price:,.0f} Rs/quintal in "
                        f"{m} ({diff:+.0f}% vs the long-run average)")
     elif rec["method"] == "same_month_average":
-        reasons.append(f"Historical {m} average is {price:,.0f} Rs/q ({diff:+.0f}% vs the overall "
+        reasons.append(f"Historical {m} average is {price:,.0f} Rs/quintal ({diff:+.0f}% vs the overall "
                        f"average); SARIMAX not used: too little history")
     else:
-        reasons.append(f"No {m} prices on record; using the overall average {price:,.0f} Rs/q")
+        reasons.append(f"No {m} prices on record; using the overall average {price:,.0f} Rs/quintal")
     trend = (rec["last_3m_mean"] / mean - 1) * 100 if mean else 0.0
-    reasons.append(f"Last 3 months averaged {rec['last_3m_mean']:,.0f} Rs/q ({trend:+.0f}% vs long-run)")
+    reasons.append(f"Last 3 months averaged {rec['last_3m_mean']:,.0f} Rs/quintal ({trend:+.0f}% vs long-run)")
     if in_window:
         reasons.append(f"Sowing month fits the usual {crop} calendar; harvest lands in {m}")
     else:
