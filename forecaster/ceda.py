@@ -15,8 +15,14 @@ wrong about response shapes, so trust this module, not the docs):
                                       census_district_id, census_district_name}]
   * POST /agmarknet/markets      {commodity_id, state_id, district_id, indicator}
                                   -> [{market_id, market_name, ...}]
-  * POST /agmarknet/prices       {commodity_id, state_id, district_id: [..], market_id: [..],
-                                  from_date, to_date} -> daily rows
+                                  HANGS (60 s gateway 504) as of 2026-09-27, so it is only
+                                  called when `ceda.fetch_market_lists: true`.
+  * POST /agmarknet/prices       {commodity_id, state_id, district_id: [..], from_date, to_date}
+                                  -> daily rows, one per market (market_id in every row).
+                                  Adding `market_id: [..]` makes the request hang (504); leave
+                                  it out and filter to config markets locally in data.py.
+                                  With no district_id the API returns STATE AVERAGES (no
+                                  market_id), which are useless here.
                                   [{date, commodity_id, census_state_id, census_district_id,
                                     market_id, min_price, max_price, modal_price}]
   * POST /agmarknet/quantities   same body -> daily arrivals. NOT verified yet: if it fails,
@@ -47,6 +53,10 @@ INDICATORS = {"price": "/agmarknet/prices", "quantity": "/agmarknet/quantities"}
 
 class CedaError(RuntimeError):
     """Non-auth API failure."""
+
+
+class CedaServerError(CedaError):
+    """5xx or network timeout: the window may be too big for the gateway (60 s)."""
 
 
 class CedaAuthError(CedaError):
@@ -95,8 +105,11 @@ class CedaClient:
     def _scrub(self, text: str) -> str:
         return text.replace(self._key, "***") if self._key else text
 
-    def request(self, method: str, path: str, body: dict | None = None) -> list[dict]:
-        for attempt in range(1, self.max_retries + 1):
+    def request(self, method: str, path: str, body: dict | None = None,
+                retry: bool = True) -> list[dict]:
+        """retry=False: raise CedaServerError on the first 5xx/timeout (caller splits the window)."""
+        tries = self.max_retries if retry else 1
+        for attempt in range(1, tries + 1):
             if self.requests_made >= self.max_requests:
                 raise BudgetExhausted(f"used this run's budget of {self.max_requests} requests")
             wait = self.min_interval - (time.monotonic() - self._last)
@@ -107,8 +120,8 @@ class CedaClient:
                 resp = self._http.request(method, path, json=body)
             except httpx.HTTPError as exc:
                 self._last = time.monotonic()
-                if attempt == self.max_retries:
-                    raise CedaError(self._scrub(f"{path}: network error {type(exc).__name__}")) from None
+                if attempt == tries:
+                    raise CedaServerError(self._scrub(f"{path}: network error {type(exc).__name__}")) from None
                 time.sleep(2.0 * attempt)
                 continue
             self._last = time.monotonic()
@@ -120,16 +133,18 @@ class CedaClient:
                     f"{path}: rate limited (Retry-After={ra or '?'}s, "
                     f"policy={resp.headers.get('RateLimit-Policy')})",
                     int(ra) if ra.isdigit() else None)
-            if resp.status_code >= 500 and attempt < self.max_retries:
-                time.sleep(2.0 * attempt)
-                continue
+            if resp.status_code >= 500:
+                if attempt < tries:
+                    time.sleep(2.0 * attempt)
+                    continue
+                raise CedaServerError(self._scrub(f"{path}: HTTP {resp.status_code}: {resp.text[:120]}"))
             if resp.status_code >= 400:
                 raise CedaError(self._scrub(f"{path}: HTTP {resp.status_code}: {resp.text[:300]}"))
             output = resp.json().get("output", {})
             if output.get("type") != "success":
                 raise CedaError(self._scrub(f"{path}: {output.get('message', 'unknown error')}"))
             return output.get("data") or []
-        raise CedaError(f"{path}: failed after {self.max_retries} attempts")
+        raise CedaError(f"{path}: failed after {tries} attempts")
 
 
 # ------------------------------------------------------------------------------ planning
@@ -233,11 +248,20 @@ class Downloader:
         if path.exists() and not (is_open and self.ccfg.get("refresh_open_chunk", True)):
             return len(self._read(path)["records"])
         body = {"commodity_id": plan.commodity_ids[crop], "state_id": plan.state_id,
-                "district_id": list(plan.district_ids.values()), "market_id": market_ids,
+                "district_id": list(plan.district_ids.values()),
                 "from_date": a.isoformat(), "to_date": b.isoformat()}
-        rows = self.c.request("POST", INDICATORS[indicator], body)
+        if market_ids:  # only when market lists are fetched; the live API hangs on this filter
+            body["market_id"] = market_ids
+        can_split = (b - a).days + 1 > 2 * int(self.ccfg["min_chunk_days"])
+        try:
+            rows = self.c.request("POST", INDICATORS[indicator], body, retry=False)
+        except CedaServerError as exc:
+            if not can_split:
+                raise
+            self.log.append(f"{indicator}/{crop} {a}..{b}: {exc}; splitting the window")
+            return sum(self.fetch_chunk(plan, indicator, crop, market_ids, x, y) for x, y in split_chunk(a, b))
         caps = set(self.ccfg.get("suspicious_row_counts", []))
-        if len(rows) in caps and (b - a).days + 1 > 2 * int(self.ccfg["min_chunk_days"]):
+        if len(rows) in caps and can_split:
             self.log.append(f"{indicator}/{crop} {a}..{b}: {len(rows)} rows looks capped, splitting")
             return sum(self.fetch_chunk(plan, indicator, crop, market_ids, x, y) for x, y in split_chunk(a, b))
         if len(rows) in caps:
@@ -258,11 +282,13 @@ class Downloader:
         for indicator in ("price", "quantity"):
             for crop in self.cfg["crops"]:
                 try:
-                    mkts = self.markets(plan, crop, indicator)
-                    ids = sorted({int(m["market_id"]) for m in mkts})
-                    if not ids:
-                        summary["skipped"].append(f"{indicator}/{crop}: no markets in configured districts")
-                        continue
+                    ids: list[int] = []
+                    if self.ccfg.get("fetch_market_lists", False):
+                        mkts = self.markets(plan, crop, indicator)
+                        ids = sorted({int(m["market_id"]) for m in mkts})
+                        if not ids:
+                            summary["skipped"].append(f"{indicator}/{crop}: no markets in configured districts")
+                            continue
                     for a, b in plan.chunks:
                         n = self.fetch_chunk(plan, indicator, crop, ids, a, b)
                         summary["chunks"].append({"indicator": indicator, "crop": crop,
@@ -290,7 +316,8 @@ def main(argv: list[str] | None = None) -> int:
         start = date.fromisoformat(str(ccfg["start_date"]))
         end = date.fromisoformat(str(ccfg["end_date"])) if ccfg.get("end_date") else date.today()
         chunks = date_chunks(start, end, int(ccfg["chunk_years"]))
-        n = 2 + 2 * len(cfg["crops"]) * len(ccfg["districts"]) + 2 * len(cfg["crops"]) * len(chunks)
+        lists = 2 * len(cfg["crops"]) * len(ccfg["districts"]) if ccfg.get("fetch_market_lists") else 0
+        n = 2 + lists + 2 * len(cfg["crops"]) * len(chunks)
         print(f"{len(chunks)} windows: {[(a.isoformat(), b.isoformat()) for a, b in chunks]}")
         print(f"~{n} requests on a cold cache (budget per run: {ccfg['max_requests_per_run']}, "
               "cached files are skipped)")
