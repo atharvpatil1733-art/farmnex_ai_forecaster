@@ -58,15 +58,24 @@ def shap_reasons(booster, X: pd.DataFrame, target: str = "price", top: int = 3) 
     out = []
     for i in range(len(X)):
         c = contrib[i, :-1]  # last column is the expected value (bias)
-        order = np.argsort(-np.abs(c))[:top]
         row = X.iloc[i]
+        order = np.argsort(-np.abs(c))
+        # A missing value is not a cause a farmer can act on: explain with observed drivers only,
+        # and say once that recent reports are sparse if missing values mattered a lot.
+        missing_top = any(pd.isna(row.iloc[j]) for j in order[:top])
         texts = []
         for j in order:
+            if len(texts) == top:
+                break
             val = row.iloc[j]
-            val = None if pd.isna(val) else (float(val) if not isinstance(val, str) else val)
+            if pd.isna(val):
+                continue
+            val = float(val) if not isinstance(val, str) else val
             pct = (np.exp(c[j]) - 1) * 100
             texts.append(f"{_describe(names[j], val, row, target)} "
                          f"{'raises' if c[j] > 0 else 'lowers'} the forecast by ~{abs(pct):.0f}%")
+        if missing_top:
+            texts.append("few recent reports from this market, so this forecast is less certain")
         out.append(texts)
     return out
 

@@ -113,6 +113,13 @@ class ForecastService:
                 d["reason"] = reasons[i]
         return out
 
+    def _typical_arrivals_quintal(self, market: str, crop: str) -> float | None:
+        """Median REAL daily arrivals (quintals) over the last depth_lookback_days; None if unknown."""
+        days = int(self.cfg["recommend"]["depth_lookback_days"])
+        r = self.real[(self.real["market"] == market) & (self.real["commodity"] == crop)
+                      & (self.real["date"] > self.as_of - pd.Timedelta(days=days))]["arrivals_tonnes"].dropna()
+        return float(r.median() * 10) if len(r) >= 5 else None
+
     def _staleness_note(self, market: str, crop: str) -> list[str]:
         s = self.source(market, crop)
         if s["price_source"] == "synthetic":
@@ -210,6 +217,7 @@ class ForecastService:
             d = recommend.haversine_km(lat, lon, float(coords.at[m, "lat"]), float(coords.at[m, "lon"]))
             if d <= radius:
                 near.append((m, d))
+        share = float(self.cfg["recommend"]["thin_market_share"])
         options = []
         if near:
             fc = self.forecast_pairs([(m, crop) for m, _ in near], self.max_h)
@@ -221,24 +229,31 @@ class ForecastService:
                 cost = round(dist * rate, 1)
                 net = round(best["p50"] - cost, 1)
                 src = self.source(m, crop)
+                depth_q = self._typical_arrivals_quintal(m, crop)
+                thin = depth_q is not None and qty_quintal > share * depth_q
+                thin_note = ([f"{m} normally receives about {depth_q:,.0f} quintals of {crop} a day; "
+                              f"{qty_quintal:g} quintals may push the price down (ranked lower)"] if thin else [])
                 options.append({
                     "market": m, "district": self.cfg["markets"][m].get("district"), "distance_km": round(dist, 1),
                     "best_day": best["date"], "asking_price": best["p50"], "floor_price": best["p10"],
                     "transport_cost_per_quintal": cost, "net_price_per_quintal": net,
                     "net_total": round(net * qty_quintal, 0),
                     "likely_closed_days": [d["date"] for d in f["days"] if d["likely_closed"]],
+                    "typical_daily_arrivals_quintal": None if depth_q is None else round(depth_q, 1),
+                    "thin_market": thin,
                     "data_source": src["price_source"], "as_of": self.pair_as_of(m, crop),
                     "reason": ([f"best open day {best['date']}: expected price {best['p50']:,.0f} Rs/quintal, "
                                 f"minus transport for {dist:,.0f} km at {rate:g} Rs/km per quintal "
                                 f"= {cost:,.0f} Rs/quintal"]
-                               + self._staleness_note(m, crop) + f["reason"])[:4],
+                               + thin_note + self._staleness_note(m, crop) + f["reason"])[:4],
                 })
-        # Trust tier first: fresh real data, then stale real data, then synthetic; then net price.
+        # Trust tier first: fresh real data on a market deep enough for this load, then thin or
+        # stale real data, then synthetic; then net price.
         stale = self.cfg["recommend"]["stale_days_warning"]
         def tier(o):
             if o["data_source"] == "synthetic":
                 return 2
-            return 1 if (self.as_of.date() - o["as_of"]).days > stale else 0
+            return 1 if o["thin_market"] or (self.as_of.date() - o["as_of"]).days > stale else 0
         options.sort(key=lambda o: (tier(o), -o["net_price_per_quintal"]))
         msg = (f"{len(options)} market(s) within {radius:g} km" if options
                else f"no configured market within {radius:g} km; increase radius_km")
@@ -246,7 +261,7 @@ class ForecastService:
         why = []
         if best:
             why = [f"{best['market']}: highest net price among markets with the most trustworthy data "
-                   f"(fresh real > stale real > synthetic)"] + best["reason"][:2]
+                   f"(fresh real on a big enough market > thin or stale real > synthetic)"] + best["reason"][:2]
         return {"crop": crop, "qty_quintal": qty_quintal, "radius_km": radius, "forecast_origin": self.as_of.date(),
                 "best": best, "options": options, "message": msg,
                 "data_source": best["data_source"] if best else None, "as_of": best["as_of"] if best else None,

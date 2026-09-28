@@ -94,3 +94,16 @@ def test_bad_inputs(client):
     body = {"lat": 28.6, "lon": 77.2, "crop": "Onion", "qty_quintal": 5, "radius_km": 50}  # Delhi
     j = client.post("/forecast/sell-options", json=body).json()
     assert j["best"] is None and "increase radius_km" in j["message"]
+
+
+def test_sell_options_demotes_thin_markets(client):
+    """A load far bigger than a market's normal daily arrivals must not win on price alone."""
+    body = {"lat": 18.83, "lon": 74.37, "crop": "Tomato", "qty_quintal": 50, "radius_km": 80}
+    j = client.post("/forecast/sell-options", json=body).json()
+    opts = j["options"]
+    thin = [o for o in opts if o["thin_market"]]
+    for o in thin:
+        assert o["typical_daily_arrivals_quintal"] is not None and o["typical_daily_arrivals_quintal"] * 0.5 < 50
+        assert any("normally receives" in r for r in o["reason"])
+    if j["best"] and any(not o["thin_market"] and o["data_source"] == "real" for o in opts):
+        assert not j["best"]["thin_market"]

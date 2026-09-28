@@ -107,6 +107,9 @@ class SellOption(BaseModel):
     net_price_per_quintal: float = Field(description="asking price minus transport")
     net_total: float = Field(description="net price x qty_quintal, Rs")
     likely_closed_days: list[date]
+    typical_daily_arrivals_quintal: float | None = Field(
+        default=None, description="median real daily arrivals at this market (last 90 days); None if unknown")
+    thin_market: bool = Field(default=False, description="load is large vs what this market normally receives")
     data_source: DataSource
     as_of: date
     reason: list[str]

@@ -151,6 +151,10 @@ recommend:
   default_radius_km: 100
   demand_threshold_pct: 3.0      # price/arrivals moves smaller than this count as "flat"
   stale_days_warning: 30         # warn when a pair's last real report is older than this vs as_of
+  # A market is "thin" for this sale when the farmer's load is more than this share of the
+  # market's typical (median, last 90 days, real) daily arrivals: selling there would move the price.
+  thin_market_share: 0.5
+  depth_lookback_days: 90
 api:
   cors_origins: ["*"]            # Flutter web; tighten to the app's origin before production
   demand_note: >-
