@@ -52,11 +52,14 @@ def test_generate_is_deterministic(cfg, real):
 
 
 def test_fallback_is_per_pair_and_per_target(cfg, real, synth):
+    # Remove tomato arrivals from a copy so the test does not depend on what the source provides.
+    real = real.copy()
+    real.loc[real["commodity"] == "Tomato", "arrivals_tonnes"] = np.nan
     panel, src = build_panel(cfg, real, synth)
     s = src.set_index(["market", "commodity"])
     # Pune Onion has real price and real arrivals
     assert tuple(s.loc[("Pune", "Onion"), ["price_source", "arrivals_source"]]) == ("real", "real")
-    # Tomato has real prices but no real arrivals anywhere -> synthetic arrivals only
+    # real prices but no real arrivals -> synthetic arrivals only
     assert tuple(s.loc[("Pune", "Tomato"), ["price_source", "arrivals_source"]]) == ("real", "synthetic")
     # Vashi has no real data at all
     assert tuple(s.loc[("Vashi", "Onion"), ["price_source", "arrivals_source"]]) == ("synthetic", "synthetic")
@@ -71,8 +74,6 @@ def test_fallback_is_per_pair_and_per_target(cfg, real, synth):
     real_t = real[(real["market"] == "Pune") & (real["commodity"] == "Tomato")]
     assert set(tp.dropna(subset=["modal_price"])["date"]) == set(real_t.dropna(subset=["modal_price"])["date"])
     assert (tp["arrivals_source"] == "synthetic").all()
-    # the real mandi.csv is never modified: tomato stays without arrivals there
-    assert real.loc[real["commodity"] == "Tomato", "arrivals_tonnes"].isna().all()
 
 
 def test_thin_pair_counts_as_synthetic(cfg):

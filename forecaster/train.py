@@ -240,9 +240,10 @@ def write_metrics(metrics: dict, meta: dict, sources: pd.DataFrame, path: Path) 
     n_real = (sources["price_source"] == "real").sum()
     out += ["## Data behind the models", "",
             f"- {n_real} of {len(sources)} market x crop pairs have real prices; the rest use synthetic prices.",
-            f"- {(sources['arrivals_source'] == 'real').sum()} pairs have real arrivals; "
-            "Tomato has no real arrivals anywhere, so tomato arrivals forecasts are synthetic-only "
-            "and are not scored.",
+            f"- {(sources['arrivals_source'] == 'real').sum()} pairs have real arrivals"
+            + (f"; no real arrivals at all for {', '.join(no_arr)} (synthetic-only, not scored)."
+               if (no_arr := [c for c, g in sources.groupby('commodity') if (g['arrivals_source'] == 'synthetic').all()])
+               else "."),
             f"- Rows: " + ", ".join(f"{t}: train {v['train_rows']}, test {v['test_rows']}"
                                     for t, v in meta["targets"].items()),
             "", "## Best-crop monthly model (SARIMAX)", ""]
