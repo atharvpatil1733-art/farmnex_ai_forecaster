@@ -15,17 +15,30 @@ def client():
         yield c
 
 
+@pytest.fixture(scope="module")
+def synth_pair(client):
+    """A (market, crop, lat, lon, district) with synthetic prices only, read from the data
+    (which pairs have real data changes as districts are added)."""
+    src = client.app.state.svc.sources
+    rows = src[src["price_source"] == "synthetic"]
+    if rows.empty:
+        pytest.skip("every market x crop has real prices")
+    m, c = rows.iloc[0][["market", "commodity"]]
+    ref = client.app.state.svc.ref["markets"].set_index("market").loc[m]
+    return m, c, float(ref["lat"]), float(ref["lon"]), ref["district"]
+
+
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok" and r.json()["data_as_of"]
 
 
-def test_meta(client):
+def test_meta(client, synth_pair):
     j = client.get("/meta").json()
     assert j["synthetic_shown"] is False
     assert {m["market"] for m in j["markets"]} <= set(CFG["markets"])
-    assert "Vashi" not in {m["market"] for m in j["markets"]}  # no real data -> hidden
+    assert (synth_pair[0], synth_pair[1]) not in {(p["market"], p["crop"]) for p in j["pairs"]}
     assert all(p["price_source"] == "real" for p in j["pairs"])
     assert set(j["crops"]) <= set(CFG["crops"]) and "Pune" in j["districts"]
     assert j["attribution"] == ATTR and j["data_as_of"]
@@ -84,15 +97,20 @@ def test_markets_without_real_data_are_hidden_not_crashing(client, market):
             assert r.json()["data_source"] == "real"
 
 
-def test_hidden_synthetic_never_reaches_answers(client):
-    assert client.get("/forecast/demand", params={"district": "Thane"}).status_code == 404
-    body = {"lat": 19.08, "lon": 73.01, "crop": "Tomato", "qty_quintal": 5, "radius_km": 30}
+def test_hidden_synthetic_never_reaches_answers(client, synth_pair):
+    market, crop, lat, lon, district = synth_pair
+    r = client.get("/forecast/price", params={"market": market, "crop": crop})
+    assert r.status_code == 404 and "synthetic data is hidden" in r.json()["detail"]
+    body = {"lat": lat, "lon": lon, "crop": crop, "qty_quintal": 5, "radius_km": 1}
     j = client.post("/forecast/sell-options", json=body).json()
-    assert j["best"] is None  # Vashi/Kalyan only have synthetic data
-    j = client.post("/forecast/sell-options", json={**body, "lat": 18.83, "lon": 74.37, "radius_km": 80}).json()
+    assert j["best"] is None  # the only market in range has synthetic data only
+    j = client.post("/forecast/sell-options", json={**body, "radius_km": 80}).json()
     assert all(o["data_source"] == "real" for o in j["options"])
-    for i in client.get("/forecast/demand", params={"district": "Pune"}).json()["items"]:
-        assert all(p["price_source"] == "real" for p in i["pairs"])
+    for d in client.get("/meta").json()["districts"]:
+        for i in client.get("/forecast/demand", params={"district": d}).json()["items"]:
+            assert all(p["price_source"] == "real" for p in i["pairs"])
+        for i in client.get("/forecast/crops", params={"district": d, "sowing_month": 7}).json()["items"]:
+            assert i["data_source"] == "real"
 
 
 @pytest.fixture(scope="module")
@@ -113,12 +131,30 @@ def test_synthetic_mode_markets_do_not_crash(shown, market):
             assert any("SYNTHETIC" in x for x in j["reason"])
 
 
-def test_synthetic_mode_thane_district(shown):
-    assert shown.demand("Thane")["items"]
-    assert all(i["data_source"] == "synthetic" for i in shown.best_crops("Thane", 10)["items"])
-    j = shown.sell_options(19.08, 73.01, "Tomato", 5, 30)
-    assert j["best"]["market"] == "Vashi" and j["best"]["data_source"] == "synthetic"
+def test_synthetic_mode_shows_synthetic_pairs(shown, synth_pair):
+    market, crop, lat, lon, district = synth_pair
+    assert shown.price(market, crop)["data_source"] == "synthetic"
+    j = shown.sell_options(lat, lon, crop, 5, 1)
+    assert j["best"]["market"] == market and j["best"]["data_source"] == "synthetic"
+    pairs = [p for i in shown.demand(district)["items"] for p in i["pairs"]]
+    assert any(p["market"] == market and p["price_source"] == "synthetic" for p in pairs)
     assert len(shown.meta_info()["pairs"]) == len(CFG["markets"]) * len(CFG["crops"])
+
+
+def test_sell_options_says_when_market_size_is_unknown(client):
+    """Markets with `has_arrivals: false` (placeholder quantity reports) can't be checked for depth."""
+    no_arr = [m for m, spec in CFG["markets"].items() if spec.get("has_arrivals") is False]
+    if not no_arr:
+        pytest.skip("no market configured with has_arrivals: false")
+    ref = client.app.state.svc.ref["markets"].set_index("market").loc[no_arr[0]]
+    for crop in CFG["crops"]:
+        body = {"lat": float(ref["lat"]), "lon": float(ref["lon"]), "crop": crop, "qty_quintal": 20, "radius_km": 1}
+        j = client.post("/forecast/sell-options", json=body).json()
+        if j["best"] and j["best"]["data_source"] == "real":
+            assert j["best"]["typical_daily_arrivals_quintal"] is None
+            assert any("no reliable arrivals data" in r for r in j["best"]["reason"])
+            return
+    pytest.skip("no real pair for that market")
 
 
 def test_cors_allows_local_dev_and_blocks_unknown_origins(client):

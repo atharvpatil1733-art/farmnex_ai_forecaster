@@ -1,5 +1,5 @@
 {
-  "model_version": "20260928T073941Z-asof20251030",
+  "model_version": "20260928T081539Z-asof20251030",
   "as_of": "2025-10-30",
   "cutoff": "2025-08-31",
   "horizons": [
@@ -63,9 +63,9 @@
         "arr_lag_7",
         "arr_roll_mean_7"
       ],
-      "train_rows": 177675,
-      "test_rows": 5046,
-      "final_rows": 182721
+      "train_rows": 203838,
+      "test_rows": 4800,
+      "final_rows": 208638
     },
     "arrivals": {
       "features": [
@@ -93,9 +93,9 @@
         "price_lag_1",
         "price_roll_mean_7"
       ],
-      "train_rows": 168250,
-      "test_rows": 5055,
-      "final_rows": 173305
+      "train_rows": 187552,
+      "test_rows": 5025,
+      "final_rows": 192577
     }
   },
   "likely_closed": {
@@ -151,7 +151,9 @@
       3,
       5
     ],
-    "Vashi": [],
+    "Vashi": [
+      6
+    ],
     "Kalyan": []
   },
   "sources": [
@@ -494,49 +496,49 @@
     {
       "market": "Vashi",
       "commodity": "Onion",
-      "real_price_days": 0,
-      "real_arrivals_days": 0,
-      "price_source": "synthetic",
-      "arrivals_source": "synthetic"
+      "real_price_days": 3685,
+      "real_arrivals_days": 3679,
+      "price_source": "real",
+      "arrivals_source": "real"
     },
     {
       "market": "Vashi",
       "commodity": "Tomato",
-      "real_price_days": 0,
-      "real_arrivals_days": 0,
-      "price_source": "synthetic",
-      "arrivals_source": "synthetic"
+      "real_price_days": 2353,
+      "real_arrivals_days": 3843,
+      "price_source": "real",
+      "arrivals_source": "real"
     },
     {
       "market": "Vashi",
       "commodity": "Potato",
-      "real_price_days": 0,
-      "real_arrivals_days": 0,
-      "price_source": "synthetic",
-      "arrivals_source": "synthetic"
+      "real_price_days": 3781,
+      "real_arrivals_days": 3740,
+      "price_source": "real",
+      "arrivals_source": "real"
     },
     {
       "market": "Kalyan",
       "commodity": "Onion",
-      "real_price_days": 0,
+      "real_price_days": 2409,
       "real_arrivals_days": 0,
-      "price_source": "synthetic",
+      "price_source": "real",
       "arrivals_source": "synthetic"
     },
     {
       "market": "Kalyan",
       "commodity": "Tomato",
-      "real_price_days": 0,
+      "real_price_days": 2326,
       "real_arrivals_days": 0,
-      "price_source": "synthetic",
+      "price_source": "real",
       "arrivals_source": "synthetic"
     },
     {
       "market": "Kalyan",
       "commodity": "Potato",
-      "real_price_days": 0,
+      "real_price_days": 1717,
       "real_arrivals_days": 0,
-      "price_source": "synthetic",
+      "price_source": "real",
       "arrivals_source": "synthetic"
     }
   ],
@@ -548,5 +550,5 @@
     "Thane x Tomato: SARIMAX ok",
     "Thane x Potato: SARIMAX ok"
   ],
-  "train_seconds": 41.1
+  "train_seconds": 47.6
 }

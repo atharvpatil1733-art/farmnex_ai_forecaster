@@ -398,6 +398,18 @@ def prepare(cfg: dict | None = None, raw_dir: Path | None = None,
         rep.notes.append(f"Ignored {int(forced.sum())} quantity rows for crops configured "
                          f"with has_arrivals: false ({', '.join(no_arrivals)}).")
         q = q[~forced]
+    # Markets whose quantity reports are placeholders (config `has_arrivals: false` on the
+    # market): arrivals stay NaN, never replaced by estimates.
+    bad_mkts = {m: (s or {}).get("arrivals_note", "") for m, s in cfg["markets"].items()
+                if not (s or {}).get("has_arrivals", True)}
+    forced = q["market"].isin(bad_mkts)
+    if forced.any():
+        for m, why in bad_mkts.items():
+            n = int((q["market"] == m).sum())
+            if n:
+                rep.notes.append(f"Ignored {n} quantity rows for market {m} (`has_arrivals: false`"
+                                 f"{': ' + why if why else ''}); its arrivals_tonnes stay empty.")
+        q = q[~forced]
 
     keys = ["date", "market", "commodity"]
     orphan = q.merge(p[keys], how="left", indicator=True)
@@ -459,7 +471,8 @@ def coverage_table(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
             span = (g["date"].max() - g["date"].min()).days + 1
             gaps = g["date"].diff().dt.days.dropna() - 1
             cov = 100 * len(g) / span
-            has_arr = cfg["crops"][crop].get("has_arrivals", True)
+            has_arr = (cfg["crops"][crop].get("has_arrivals", True)
+                       and (cfg["markets"].get(market) or {}).get("has_arrivals", True))
             status = "ok" if cov >= dp["low_coverage_warn_pct"] else "LOW coverage, weak forecasts"
             if len(g) < 30:
                 status = "VERY sparse (<30 days), weak forecasts"

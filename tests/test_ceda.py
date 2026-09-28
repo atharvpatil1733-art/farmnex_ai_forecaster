@@ -11,6 +11,8 @@ from forecaster.ceda import (BudgetExhausted, CedaAuthError, CedaClient, CedaRat
 from forecaster.data import load_config, prepare
 
 MARKETS = {1: "Pune", 2: "Pune(Pimpri)", 3: "Junnar(Otur)"}
+THANE_MARKETS = {9: "Kalyan"}
+DISTRICT_MARKETS = {521: MARKETS, 517: THANE_MARKETS}
 CROPS = {"Onion": 23, "Tomato": 78, "Potato": 24}
 
 
@@ -35,13 +37,16 @@ class FakeCeda:
             return ok([{"census_state_id": 27, "census_state_name": "Maharashtra",
                         "census_district_id": 521, "census_district_name": "Pune"},
                        {"census_state_id": 27, "census_state_name": "Maharashtra",
-                        "census_district_id": 517, "census_district_name": "Thane"}])
+                        "census_district_id": 517, "census_district_name": "Thane"},
+                       {"census_state_id": 27, "census_state_name": "Maharashtra",
+                        "census_district_id": 519, "census_district_name": "Mumbai"}])
         if path == "/agmarknet/commodities":
             return ok([{"commodity_id": v, "commodity_name": k} for k, v in CROPS.items()])
         if path == "/agmarknet/markets":
             if self.hang_on_market_filter:
                 return httpx.Response(504, text="<html>504 Gateway Time-out</html>")
-            return ok([{"market_id": k, "market_name": v} for k, v in MARKETS.items()])
+            return ok([{"market_id": k, "market_name": v}
+                       for k, v in DISTRICT_MARKETS.get(body.get("district_id"), MARKETS).items()])
         if path in ("/agmarknet/prices", "/agmarknet/quantities"):
             if path.endswith("quantities") and not self.quantities:
                 return httpx.Response(404, json={"detail": "Not Found"})
@@ -52,9 +57,11 @@ class FakeCeda:
                 return httpx.Response(504, text="<html>504 Gateway Time-out</html>")
             rows, d = [], a
             while d <= b:
-                for mid in body.get("market_id") or list(MARKETS):
+                pairs = [(did, mid) for did in body["district_id"] for mid in DISTRICT_MARKETS.get(did, {})
+                         if not body.get("market_id") or mid in body["market_id"]]
+                for did, mid in pairs:
                     base = {"date": f"{d.isoformat()}T00:00:00", "commodity_id": body["commodity_id"],
-                            "census_state_id": 27, "census_district_id": 521, "market_id": mid}
+                            "census_state_id": 27, "census_district_id": did, "market_id": mid}
                     if path.endswith("prices"):
                         rows.append(dict(base, min_price=900, max_price=1100, modal_price=1000 + mid))
                     else:
@@ -68,9 +75,9 @@ class FakeCeda:
 
 def make_cfg(start="2024-01-01", end="2024-01-10", years=1, budget=100, fetch_lists=True):
     cfg = copy.deepcopy(load_config())
-    cfg["ceda"].update(start_date=start, end_date=end, chunk_years=years,
+    cfg["ceda"].update(districts=["Pune"], start_date=start, end_date=end, chunk_years=years,
                        max_requests_per_run=budget, min_chunk_days=2,
-                       fetch_market_lists=fetch_lists)
+                       fetch_market_lists=fetch_lists, fetch_market_names=False)
     return cfg
 
 
@@ -195,3 +202,69 @@ def test_gateway_timeout_splits_window(tmp_path):
     onion = df[(df["commodity"] == "Onion") & (df["market"] == "Pune")]
     assert onion["date"].min().date() == date(2024, 1, 1)
     assert onion["date"].max().date() == date(2024, 1, 20)
+
+
+def test_adding_a_district_fetches_only_the_new_one(tmp_path):
+    """Old cache files (no district in the name) stay valid; a new district costs one request
+    per window and indicator x crop, and never re-downloads Pune."""
+    cfg = district_cfg(tmp_path, end="2024-12-31")
+    cfg["ceda"]["refresh_open_chunk"] = False
+    cache = tmp_path / "ceda"
+    Downloader(cfg, client(FakeCeda()), cache, today=date(2026, 9, 27)).run()
+    for f in (cache / "price").glob("*__d521.json"):  # simulate the older cache layout
+        f.rename(f.with_name(f.name.replace("__d521", "")))
+
+    cfg["ceda"]["districts"] = ["Pune", "Thane"]
+    # /markets hangs live, so a new district's ids are named via "market_id N" aliases.
+    cfg["markets"]["Kalyan"]["aliases"] = ["Kalyan", "market_id 9"]
+    fake = FakeCeda()
+    Downloader(cfg, client(fake), cache, today=date(2026, 9, 27)).run()
+    data_calls = [b for p, b in fake.calls if p in ("/agmarknet/prices", "/agmarknet/quantities")]
+    assert len(data_calls) == 2 * 3 and all(b["district_id"] == [517] for b in data_calls)
+
+    df, _ = prepare(cfg, ceda_dir=cache)
+    kalyan = df[df["market"] == "Kalyan"]
+    assert len(kalyan) == 366 * 3 and (kalyan["district"] == "Thane").all()
+    assert len(df[df["market"] == "Pune"]) == 366 * 3  # no duplicate Pune rows
+
+    fake3 = FakeCeda()
+    Downloader(cfg, client(fake3), cache, today=date(2026, 9, 27)).run()
+    assert fake3.calls == []
+
+
+def test_open_window_refresh_is_age_based(tmp_path):
+    cfg = make_cfg(start="2026-09-20", end=None)
+    cfg["ceda"]["refresh_open_chunk_hours"] = 24
+    Downloader(cfg, client(FakeCeda()), tmp_path, today=date(2026, 9, 27)).run()
+    fake = FakeCeda()
+    Downloader(cfg, client(fake), tmp_path, today=date(2026, 9, 27)).run()
+    assert fake.calls == []  # fetched minutes ago: not refetched
+
+    for f in (tmp_path / "price").glob("*.json"):  # pretend it was fetched two days ago
+        payload = json.loads(f.read_text())
+        payload["fetched_at"] = "2026-09-25T00:00:00+00:00"
+        f.write_text(json.dumps(payload))
+    fake = FakeCeda()
+    Downloader(cfg, client(fake), tmp_path, today=date(2026, 9, 27)).run()
+    assert sum(p == "/agmarknet/prices" for p, _ in fake.calls) == 3
+    assert len(list((tmp_path / "price").glob("*.json"))) == 3  # stale files replaced, not duplicated
+
+
+def test_market_names_fetched_once_per_district_and_failure_is_not_fatal(tmp_path):
+    cfg = district_cfg(tmp_path)
+    cfg["ceda"].update(districts=["Pune", "Thane"], fetch_market_names=True)
+    fake = FakeCeda()
+    Downloader(cfg, client(fake), tmp_path / "ceda", today=date(2026, 9, 27)).run()
+    names = [b for p, b in fake.calls if p == "/agmarknet/markets"]
+    assert sorted(b["district_id"] for b in names) == [517, 521]
+    assert all("market_id" not in b for p, b in fake.calls if p != "/agmarknet/markets")
+    df, _ = prepare(cfg, ceda_dir=tmp_path / "ceda")
+    assert "Kalyan" in set(df["market"])  # named by the API list, no alias needed
+
+    (tmp_path / "b").mkdir()
+    cfg2 = district_cfg(tmp_path / "b")
+    cfg2["ceda"]["fetch_market_names"] = True
+    d = Downloader(cfg2, client(FakeCeda(hang_on_market_filter=True)), tmp_path / "b" / "ceda",
+                   today=date(2026, 9, 27))
+    d.run()  # /markets 504 -> logged, prices still downloaded
+    assert any("market names for Pune not fetched" in line for line in d.log)

@@ -2,9 +2,14 @@
 
 ## data/raw/
 - `ceda/` (git-ignored): raw responses from the CEDA Agmarknet API, written by
-  `python -m forecaster.ceda`. One JSON per indicator x crop x date window, plus `ref/`
-  (id lookups, market lists) and `manifest.json` (what the last run fetched or skipped).
-  This is the **primary** source: full daily history for the Pune-district mandis in config.
+  `python -m forecaster.ceda`. One JSON per indicator x crop x date window x set of
+  districts (`__d517-519` = Thane + Mumbai), plus `ref/` (id lookups, market id -> name lists
+  per district) and `manifest.json` (what the last run fetched or skipped). Adding a district
+  to `ceda.districts` fetches only that district; cached ones are never re-downloaded.
+  This is the **primary** source: full daily history for districts Pune, Thane and Mumbai.
+  Vashi = CEDA markets "Vashi New Mumbai" (onion-potato market) + "Mumbai" (vegetable market,
+  most tomato), both at the Mumbai APMC in Vashi. Kalyan's CEDA quantity reports are
+  placeholders (0.1-1.3 t/day), so Kalyan has real prices but no arrivals (`has_arrivals: false`).
 - `*_price_data.csv`, `*_quantity_data.csv`: the first manual CEDA website exports (Onion,
   Potato price + quantity; Tomato price only). Nine of them hit the ~1000-row export cap and
   keep only Mar/Jun-Oct 2024 and Apr/May-Oct 2025. Used only as a fallback when the API cache

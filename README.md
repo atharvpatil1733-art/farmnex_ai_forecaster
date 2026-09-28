@@ -1,7 +1,7 @@
 # farmnex_ai_forecaster
 
 AI demand-forecast service for FarmNex: mandi price and arrivals forecasts for Pune-district
-markets (Onion, Tomato, Potato), best place and day to sell, and which crop to grow.
+mandis plus Vashi (Navi Mumbai) and Kalyan (Onion, Tomato, Potato), best place and day to sell, and which crop to grow.
 Standalone FastAPI service called by the FarmNex backend and Flutter app. Prototype.
 
 ## Setup

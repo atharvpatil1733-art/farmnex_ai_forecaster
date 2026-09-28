@@ -55,6 +55,7 @@ def test_fallback_is_per_pair_and_per_target(cfg, real, synth):
     # Remove tomato arrivals from a copy so the test does not depend on what the source provides.
     real = real.copy()
     real.loc[real["commodity"] == "Tomato", "arrivals_tonnes"] = np.nan
+    real = real[real["market"] != "Vashi"]  # and pretend Vashi has no real data
     panel, src = build_panel(cfg, real, synth)
     s = src.set_index(["market", "commodity"])
     # Pune Onion has real price and real arrivals
