@@ -1,6 +1,7 @@
 """FastAPI app: `uvicorn app.main:app`. Loads artifacts once at startup; CORS on for Flutter web."""
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -35,7 +36,14 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
-app.add_middleware(CORSMiddleware, allow_origins=CFG["api"]["cors_origins"],
+def cors_origins(cfg: dict) -> list[str]:
+    """Config origins plus FARMNEX_CORS_ORIGINS (comma-separated) from the environment."""
+    env = [o.strip() for o in os.environ.get("FARMNEX_CORS_ORIGINS", "").split(",") if o.strip()]
+    return list(dict.fromkeys(list(cfg["api"].get("cors_origins") or []) + env))
+
+
+app.add_middleware(CORSMiddleware, allow_origins=cors_origins(CFG),
+                   allow_origin_regex=CFG["api"].get("cors_origin_regex") or None,
                    allow_methods=["GET", "POST"], allow_headers=["*"])
 
 

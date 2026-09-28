@@ -31,6 +31,8 @@ ceda:
   # district and market ids are mapped to names from the old exports (see data.py).
   fetch_market_lists: false
   attribution: "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
+  terms_url: https://ceda.ashoka.edu.in/api-terms-conditions/   # official CEDA logo is linked from this page
+  logo_placement: bottom right      # CEDA terms: logo at the bottom right of any visual/app using the data
 
 # Canonical market names. `aliases` are raw spellings seen in Agmarknet / data.gov.in exports
 # (matched case-insensitively after trimming spaces). `in_raw_data: false` = no real data yet,
@@ -156,7 +158,14 @@ recommend:
   thin_market_share: 0.5
   depth_lookback_days: 90
 api:
-  cors_origins: ["*"]            # Flutter web; tighten to the app's origin before production
+  # CORS: exact origins allowed (add the Flutter web app's production origin here, or set
+  # FARMNEX_CORS_ORIGINS="https://app.example.com,https://staging.example.com" in the environment).
+  cors_origins: []
+  cors_origin_regex: '^https?://(localhost|127\.0\.0\.1)(:\d+)?$'   # local Flutter web dev on any port
+  # Hide market x crop pairs that have no real prices (synthetic fallback only). When false,
+  # made-up numbers never reach farmers: those pairs return 404 and are left out of /meta,
+  # /forecast/demand, /forecast/sell-options and /forecast/crops. Set true for demos/testing.
+  show_synthetic: false
   demand_note: >-
     Demand is a PROXY derived from mandi data (predicted modal price change vs predicted
     arrivals change), not measured consumer demand.

@@ -23,11 +23,16 @@ def test_health(client):
 
 def test_meta(client):
     j = client.get("/meta").json()
-    assert {m["market"] for m in j["markets"]} == set(CFG["markets"])
-    assert j["crops"] == list(CFG["crops"]) and "Pune" in j["districts"]
+    assert j["synthetic_shown"] is False
+    assert {m["market"] for m in j["markets"]} <= set(CFG["markets"])
+    assert "Vashi" not in {m["market"] for m in j["markets"]}  # no real data -> hidden
+    assert all(p["price_source"] == "real" for p in j["pairs"])
+    assert set(j["crops"]) <= set(CFG["crops"]) and "Pune" in j["districts"]
     assert j["attribution"] == ATTR and j["data_as_of"]
+    d = j["attribution_details"]
+    assert d["logo_placement"] == "bottom right" and d["terms_url"].startswith("https://")
+    assert any("endorse" in r for r in d["rules"])
     assert "PROXY" in j["demand_note"]
-    assert len(j["pairs"]) == len(CFG["markets"]) * len(CFG["crops"])
 
 
 def test_forecast_price(client):
@@ -69,22 +74,66 @@ def test_forecast_crops(client):
 
 
 @pytest.mark.parametrize("market", ["Vashi", "Kalyan", "Shirur", "Baramati"])
-def test_markets_without_real_data_do_not_crash(client, market):
+def test_markets_without_real_data_are_hidden_not_crashing(client, market):
     for crop in CFG["crops"]:
         r = client.get("/forecast/price", params={"market": market, "crop": crop})
-        assert r.status_code == 200, r.text
-        j = r.json()
+        assert r.status_code in (200, 404), r.text
+        if r.status_code == 404:
+            assert "synthetic data is hidden" in r.json()["detail"]
+        else:
+            assert r.json()["data_source"] == "real"
+
+
+def test_hidden_synthetic_never_reaches_answers(client):
+    assert client.get("/forecast/demand", params={"district": "Thane"}).status_code == 404
+    body = {"lat": 19.08, "lon": 73.01, "crop": "Tomato", "qty_quintal": 5, "radius_km": 30}
+    j = client.post("/forecast/sell-options", json=body).json()
+    assert j["best"] is None  # Vashi/Kalyan only have synthetic data
+    j = client.post("/forecast/sell-options", json={**body, "lat": 18.83, "lon": 74.37, "radius_km": 80}).json()
+    assert all(o["data_source"] == "real" for o in j["options"])
+    for i in client.get("/forecast/demand", params={"district": "Pune"}).json()["items"]:
+        assert all(p["price_source"] == "real" for p in i["pairs"])
+
+
+@pytest.fixture(scope="module")
+def shown():
+    """Service with api.show_synthetic: true (demo mode)."""
+    import copy
+    from forecaster.service import ForecastService
+    cfg = copy.deepcopy(CFG)
+    cfg["api"]["show_synthetic"] = True
+    return ForecastService(cfg)
+
+
+@pytest.mark.parametrize("market", ["Vashi", "Kalyan", "Shirur", "Baramati"])
+def test_synthetic_mode_markets_do_not_crash(shown, market):
+    for crop in CFG["crops"]:
+        j = shown.price(market, crop)
         if j["data_source"] == "synthetic":
             assert any("SYNTHETIC" in x for x in j["reason"])
 
 
-def test_thane_district_all_synthetic(client):
-    assert client.get("/forecast/demand", params={"district": "Thane"}).status_code == 200
-    j = client.get("/forecast/crops", params={"district": "Thane", "sowing_month": 10}).json()
-    assert all(i["data_source"] == "synthetic" for i in j["items"])
-    body = {"lat": 19.08, "lon": 73.01, "crop": "Tomato", "qty_quintal": 5, "radius_km": 30}
-    j = client.post("/forecast/sell-options", json=body).json()
+def test_synthetic_mode_thane_district(shown):
+    assert shown.demand("Thane")["items"]
+    assert all(i["data_source"] == "synthetic" for i in shown.best_crops("Thane", 10)["items"])
+    j = shown.sell_options(19.08, 73.01, "Tomato", 5, 30)
     assert j["best"]["market"] == "Vashi" and j["best"]["data_source"] == "synthetic"
+    assert len(shown.meta_info()["pairs"]) == len(CFG["markets"]) * len(CFG["crops"])
+
+
+def test_cors_allows_local_dev_and_blocks_unknown_origins(client):
+    ok = client.options("/meta", headers={"Origin": "http://localhost:5173",
+                                          "Access-Control-Request-Method": "GET"})
+    assert ok.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    bad = client.options("/meta", headers={"Origin": "https://evil.example.com",
+                                           "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in bad.headers
+
+
+def test_cors_env_origins(monkeypatch):
+    from app.main import cors_origins
+    monkeypatch.setenv("FARMNEX_CORS_ORIGINS", "https://app.farmnex.in, https://staging.farmnex.in")
+    assert cors_origins(CFG) == ["https://app.farmnex.in", "https://staging.farmnex.in"]
 
 
 def test_bad_inputs(client):

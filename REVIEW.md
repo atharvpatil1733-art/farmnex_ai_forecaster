@@ -137,10 +137,10 @@ Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would
 
 - **Stale data:** forecasts are for 31 Oct – 2 Nov 2025 because CEDA ends at 2025-10-30. A live feed (data.gov.in) is the next step.
 - **Unknown market id 3110** (about 4,600 rows, 2012–2020) is dropped until someone names it.
-- **15 pairs are synthetic**, including all of Vashi and Kalyan (Thane). Their numbers are illustrative only.
+- **15 pairs have no real prices**, including all of Vashi and Kalyan (Thane). By default they are hidden from every answer; with `api.show_synthetic: true` they appear, labelled `synthetic`, and their numbers are illustrative only.
 - **Crop ranking ignores yield per acre and input costs.** It compares ₹/quintal only.
 - **Reasons are in English only.** Marathi is not done.
-- **No auth, rate limiting or caching** on the API. CORS allows `*`.
+- **No auth, rate limiting or caching** on the API. CORS allows localhost on any port plus the origins you configure.
 - **CEDA data is for non-commercial use.** The app must show the CEDA logo and `attribution`.
 
 ## 6. Checklist status
@@ -155,5 +155,5 @@ Vashi and Kalyan need `Thane` or `Mumbai` added to `ceda.districts`, which would
 | 6 | Confirm transport rate | **Checked** against public rates: plausible but low if round trips are charged. **Your call.** |
 | 7 | Check sell-options from real farms | **Done** for 4 farm locations. Found and fixed thin-market recommendations; stale and synthetic markets rank last. |
 | 8 | Check reason texts | **Done.** Removed jargon ("p50", "Rs/q", "threshold"), fixed grammar, stopped presenting missing data as a cause. |
-| 9 | Hide or show synthetic-only pairs in the app | **Open:** product decision. |
-| 10 | CEDA logo in the app, tighten `api.cors_origins` | **Open:** Flutter-side and deployment. |
+| 9 | Hide or show synthetic-only pairs in the app | **Done: hidden by default.** Pairs with no real prices return 404 and are left out of `/meta`, demand, sell-options and crops. Set `api.show_synthetic: true` for demos. |
+| 10 | CEDA logo in the app, tighten `api.cors_origins` | **API side done.** `/meta.attribution_details` gives the text, terms URL, logo placement and rules. CORS now allows only localhost plus `api.cors_origins` / `FARMNEX_CORS_ORIGINS`. **Still to do in the Flutter repo:** add the official logo asset (download it from the terms page) at the bottom right of price screens, and set the production origin. |

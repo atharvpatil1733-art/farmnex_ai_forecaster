@@ -60,7 +60,18 @@ class ForecastService:
             raise NotFound(f"unknown district {district!r}; valid: {self.districts()}")
 
     def districts(self) -> list[str]:
-        return sorted({s.get("district") for s in self.cfg["markets"].values()})
+        return sorted({self.cfg["markets"][m].get("district") for m in self.markets
+                       if any(self.visible(m, c) for c in self.crops)})
+
+    def visible(self, market: str, crop: str) -> bool:
+        """Pairs without real prices are hidden unless api.show_synthetic is true."""
+        return bool(self.cfg["api"].get("show_synthetic", False)) or \
+            self.source(market, crop)["price_source"] == "real"
+
+    def check_visible(self, market: str, crop: str) -> None:
+        if not self.visible(market, crop):
+            raise NotFound(f"no real {crop} prices for {market}; synthetic data is hidden "
+                           "(set api.show_synthetic: true in config.yaml to show it)")
 
     def source(self, market: str, crop: str) -> dict:
         r = self.sources[(self.sources["market"] == market) & (self.sources["commodity"] == crop)].iloc[0]
@@ -136,20 +147,37 @@ class ForecastService:
 
     def meta_info(self) -> dict:
         m = self.ref["markets"].set_index("market")
+        markets = []
+        for k, v in self.cfg["markets"].items():
+            crops = [c for c in self.crops if self.visible(k, c)]
+            if crops:
+                markets.append({"market": k, "district": v.get("district"), "lat": float(m.at[k, "lat"]),
+                                "lon": float(m.at[k, "lon"]), "crops": crops,
+                                "likely_closed_weekdays": [WEEKDAYS[d] for d in sorted(self.likely_closed.get(k, []))]})
+        ceda = self.cfg["ceda"]
         return {
-            "markets": [{"market": k, "district": v.get("district"), "lat": float(m.at[k, "lat"]),
-                         "lon": float(m.at[k, "lon"]),
-                         "likely_closed_weekdays": [WEEKDAYS[d] for d in sorted(self.likely_closed.get(k, []))]}
-                        for k, v in self.cfg["markets"].items()],
-            "crops": self.crops, "districts": self.districts(), "data_as_of": self.as_of.date(),
+            "markets": markets,
+            "crops": [c for c in self.crops if any(self.visible(mk, c) for mk in self.markets)],
+            "districts": self.districts(), "data_as_of": self.as_of.date(),
             "model_version": self.version,
-            "pairs": [self.source(mk, c) for mk in self.markets for c in self.crops],
+            "pairs": [self.source(mk, c) for mk in self.markets for c in self.crops if self.visible(mk, c)],
             "demand_note": " ".join(self.cfg["api"]["demand_note"].split()),
+            "synthetic_shown": bool(self.cfg["api"].get("show_synthetic", False)),
             "attribution": self.attribution,
+            "attribution_details": {
+                "text": self.attribution, "terms_url": ceda["terms_url"],
+                "logo_placement": ceda["logo_placement"],
+                "rules": [f"Show the official CEDA logo ({ceda['terms_url']}) at the {ceda['logo_placement']} "
+                          "of every screen or chart that shows these prices",
+                          "Show the text credit next to the prices",
+                          "Do not imply that CEDA endorses FarmNex",
+                          "Non-commercial use only; commercial use needs CEDA's written permission"],
+            },
         }
 
     def price(self, market: str, crop: str, days: int = 3) -> dict:
         self.check(market=market, crop=crop)
+        self.check_visible(market, crop)
         if not 1 <= days <= self.max_h:
             raise NotFound(f"days must be between 1 and {self.max_h}")
         f = self.forecast_pairs([(market, crop)], days)[(market, crop)]
@@ -173,9 +201,12 @@ class ForecastService:
                            f"{(self.as_of + pd.Timedelta(days=1)).date()}..{(self.as_of + pd.Timedelta(days=self.max_h)).date()} "
                            f"(data as_of {self.as_of.date()})")
         thr = float(self.cfg["recommend"]["demand_threshold_pct"])
-        mkts = [m for m, s in self.cfg["markets"].items() if s.get("district") == district]
         items = []
         for crop in self.crops:
+            mkts = [m for m, s in self.cfg["markets"].items()
+                    if s.get("district") == district and self.visible(m, crop)]
+            if not mkts:
+                continue
             pairs = [(m, crop) for m in mkts]
             fc = self.forecast_pairs(pairs, h, explain_rows=False)
             pch, ach, srcs = [], [], []
@@ -214,6 +245,8 @@ class ForecastService:
         coords = self.ref["markets"].set_index("market")
         near = []
         for m in self.markets:
+            if not self.visible(m, crop):
+                continue
             d = recommend.haversine_km(lat, lon, float(coords.at[m, "lat"]), float(coords.at[m, "lon"]))
             if d <= radius:
                 near.append((m, d))
@@ -287,6 +320,8 @@ class ForecastService:
                 same = t[t["month"].str[5:7] == hm[5:7]]
                 row = same.tail(1) if not same.empty else t.tail(1)
             rec = row.iloc[0].to_dict()
+            if rec["data_source"] == "synthetic" and not self.cfg["api"].get("show_synthetic", False):
+                continue
             in_win = sowing_month in cal.at[crop, "sowing_months"]
             real_pairs = [m for m, s in self.cfg["markets"].items() if s.get("district") == district
                           and self.source(m, crop)["price_source"] == "real"]

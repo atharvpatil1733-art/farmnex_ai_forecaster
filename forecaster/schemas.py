@@ -29,6 +29,14 @@ class MarketInfo(BaseModel):
     lat: float
     lon: float
     likely_closed_weekdays: list[str]
+    crops: list[str] = Field(description="crops this API answers for at this market")
+
+
+class Attribution(BaseModel):
+    text: str
+    terms_url: str
+    logo_placement: str
+    rules: list[str]
 
 
 class Meta(BaseModel):
@@ -39,7 +47,9 @@ class Meta(BaseModel):
     model_version: str
     pairs: list[PairSource]
     demand_note: str
+    synthetic_shown: bool = Field(description="false: pairs without real prices are hidden everywhere")
     attribution: str
+    attribution_details: Attribution
 
 
 class PriceDay(BaseModel):

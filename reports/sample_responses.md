@@ -1,6 +1,6 @@
 # Sample responses
 
-Live calls against `uvicorn app.main:app` (one per endpoint), on CEDA API data (2012-01-01 .. 2025-10-30).
+Live calls against `uvicorn app.main:app` (one per endpoint, plus a hidden synthetic pair), on CEDA API data (2012-01-01 .. 2025-10-30).
 Long lists (meta pairs, sell options, demand pairs) are trimmed for readability; `...` marks cuts.
 
 ## GET /health
@@ -27,6 +27,11 @@ HTTP 200
       "lon": 73.8676,
       "likely_closed_weekdays": [
         "Sat"
+      ],
+      "crops": [
+        "Onion",
+        "Tomato",
+        "Potato"
       ]
     },
     {
@@ -34,14 +39,24 @@ HTTP 200
       "district": "Pune",
       "lat": 18.6279,
       "lon": 73.8009,
-      "likely_closed_weekdays": []
+      "likely_closed_weekdays": [],
+      "crops": [
+        "Onion",
+        "Tomato",
+        "Potato"
+      ]
     },
     {
       "market": "Manjri",
       "district": "Pune",
       "lat": 18.514,
       "lon": 73.976,
-      "likely_closed_weekdays": []
+      "likely_closed_weekdays": [],
+      "crops": [
+        "Onion",
+        "Tomato",
+        "Potato"
+      ]
     },
     "..."
   ],
@@ -51,8 +66,7 @@ HTTP 200
     "Potato"
   ],
   "districts": [
-    "Pune",
-    "Thane"
+    "Pune"
   ],
   "data_as_of": "2025-10-30",
   "model_version": "20260928T073941Z-asof20251030",
@@ -88,7 +102,19 @@ HTTP 200
     "..."
   ],
   "demand_note": "Demand is a PROXY derived from mandi data (predicted modal price change vs predicted arrivals change), not measured consumer demand.",
-  "attribution": "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
+  "synthetic_shown": false,
+  "attribution": "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet",
+  "attribution_details": {
+    "text": "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet",
+    "terms_url": "https://ceda.ashoka.edu.in/api-terms-conditions/",
+    "logo_placement": "bottom right",
+    "rules": [
+      "Show the official CEDA logo (https://ceda.ashoka.edu.in/api-terms-conditions/) at the bottom right of every screen or chart that shows these prices",
+      "Show the text credit next to the prices",
+      "Do not imply that CEDA endorses FarmNex",
+      "Non-commercial use only; commercial use needs CEDA's written permission"
+    ]
+  }
 }
 ```
 
@@ -186,9 +212,9 @@ HTTP 200
     },
     {
       "crop": "Tomato",
-      "signal": "NORMAL",
-      "price_change_pct": -1.5,
-      "arrivals_change_pct": -5.9,
+      "signal": "HIGH",
+      "price_change_pct": 3.6,
+      "arrivals_change_pct": -10.7,
       "data_source": "real",
       "as_of": "2025-10-30",
       "pairs": [
@@ -209,9 +235,9 @@ HTTP 200
         "..."
       ],
       "reason": [
-        "price expected to change -1.5% and arrivals -5.9%: no clear shortage or glut (moves under 3% count as flat)",
-        "typical change across 13 Pune markets: expected price on 2025-10-31 vs the last 7 days' average",
-        "9 of 14 markets have real Tomato prices; arrivals partly synthetic"
+        "price expected to change +3.6% while arrivals change -10.7%: buyers want more than is arriving",
+        "typical change across 8 Pune markets: expected price on 2025-10-31 vs the last 7 days' average",
+        "9 of 9 markets have real Tomato prices"
       ]
     },
     {
@@ -240,8 +266,8 @@ HTTP 200
       ],
       "reason": [
         "price expected to change -1.4% and arrivals -3.4%: no clear shortage or glut (moves under 3% count as flat)",
-        "typical change across 12 Pune markets: expected price on 2025-10-31 vs the last 7 days' average",
-        "10 of 14 markets have real Potato prices; arrivals partly synthetic"
+        "typical change across 8 Pune markets: expected price on 2025-10-31 vs the last 7 days' average",
+        "10 of 10 markets have real Potato prices"
       ]
     }
   ],
@@ -438,5 +464,14 @@ HTTP 200
   ],
   "note": "Ranked by expected modal price (Rs/quintal) at harvest; yields and input costs differ by crop and are not included.",
   "attribution": "Data: Centre for Economic Data & Analysis (CEDA), Ashoka University, from Agmarknet"
+}
+```
+
+## GET /forecast/price?market=Vashi&crop=Onion
+
+HTTP 404
+```json
+{
+  "detail": "no real Onion prices for Vashi; synthetic data is hidden (set api.show_synthetic: true in config.yaml to show it)"
 }
 ```

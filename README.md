@@ -44,7 +44,13 @@ inspection; training and serving rebuild it in memory (deterministic, < 1 s).
 | `GET /forecast/crops?district=&sowing_month=&k=5` | crops ranked by expected price at harvest |
 
 Every answer carries `reason`, `data_source` ("real"/"synthetic") and `as_of` (last real data
-date). Forecasts start from the data's last date (`forecast_origin`), not today, because CEDA
+date). Market x crop pairs with no real prices are hidden by default (404, left out of lists);
+set `api.show_synthetic: true` in `config.yaml` to show them for demos.
+
+**Flutter app setup:**
+- **CORS:** local development on `localhost` (any port) works out of the box. For production, add the web app's origin to `api.cors_origins` in `config.yaml`, or set
+  `FARMNEX_CORS_ORIGINS="https://app.example.com"`.
+- **CEDA attribution:** show `/meta.attribution_details` on every screen or chart with these prices. Put the official CEDA logo at the bottom right (download it from the `terms_url` page and bundle it as an asset), show the text credit, and don't imply that CEDA endorses FarmNex. Forecasts start from the data's last date (`forecast_origin`), not today, because CEDA
 data lags. See `REVIEW.md` for assumptions and limitations, `reports/` for metrics, data
 quality and sample responses.
 
