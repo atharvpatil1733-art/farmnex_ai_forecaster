@@ -108,9 +108,10 @@ All responses are Pydantic models defined in forecaster/schemas.py.
 
 ## FarmNex host facts (checked 2026-09-29 against farmnex_main)
 FarmNex uses its own RS256 JWT login (not Supabase Auth) and public_id UUIDs; the main backend adapts
-`integration/backend/farmnex_forecast.py` and stores logs in its own `fc_forecast_logs` table (see
+`integration/backend/farmnex_forecast.py` into its `backend/app/modules/forecast_host.py` and stores logs in its own `fc_forecast_logs` table (see
 `docs/integration/ai-forecaster.md` in farmnex_main). Keep the forecaster's API paths and response
-shapes stable. Crops FarmNex demos with: **Tomato** (the only crop every FarmNex component supports).
+shapes stable. Hosting: Render free sleeps after 15 min idle (~1 min to wake) — FarmNex keeps it awake
+with an uptime ping to `/health` every 10 min, or uses a paid instance; keep `/health` cheap. Crops FarmNex demos with: **Tomato** (the only crop every FarmNex component supports).
 
 ## Rules
 - Python 3.11, dependencies in requirements.txt (pandas, numpy, lightgbm, statsmodels, shap,
