@@ -106,6 +106,12 @@ POST /forecast/sell-options {lat, lon, crop, qty_quintal, radius_km}
 GET  /forecast/crops?district=&sowing_month=&k=5
 All responses are Pydantic models defined in forecaster/schemas.py.
 
+## FarmNex host facts (checked 2026-09-29 against farmnex_main)
+FarmNex uses its own RS256 JWT login (not Supabase Auth) and public_id UUIDs; the main backend adapts
+`integration/backend/farmnex_forecast.py` and stores logs in its own `fc_forecast_logs` table (see
+`docs/integration/ai-forecaster.md` in farmnex_main). Keep the forecaster's API paths and response
+shapes stable. Crops FarmNex demos with: **Tomato** (the only crop every FarmNex component supports).
+
 ## Rules
 - Python 3.11, dependencies in requirements.txt (pandas, numpy, lightgbm, statsmodels, shap,
   fastapi, uvicorn, pydantic, httpx, python-dotenv, pyyaml, pytest).
