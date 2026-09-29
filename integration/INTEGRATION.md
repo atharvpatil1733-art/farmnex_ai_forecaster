@@ -1,5 +1,14 @@
 # How to connect the forecaster to FarmNex (Flutter + FastAPI + Supabase)
 
+> ⚠️ **Connecting to the real FarmNex app? Read this first.** FarmNex does **not** use Supabase Auth:
+> it has its own login (RS256 JWTs) and its own `users` table. Used as-is, Step 3's login check
+> rejects every FarmNex user (FarmNex already sets `SUPABASE_URL`, so the check is active), and
+> Step 2's table (`user_id` → `auth.users`) can't store FarmNex users. Follow
+> **`docs/integration/ai-forecaster.md` in the `farmnex_main` repo** instead (run
+> `/integrate ai-forecaster` there): it keeps Step 1 (deploy) as is and adapts Steps 2–4.
+> Also: the FarmNex app's HTTP timeout is 20 s, so give forecast calls ~100 s and warm the service
+> before a demo.
+
 This guide is written for beginners. Do the steps in order. Each step ends with a
 **Check** so you know it worked before moving on.
 
